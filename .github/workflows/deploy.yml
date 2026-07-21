@@ -1,5 +1,5 @@
 # Deploy backend_v2 → Hostinger VPS
-# Env is built in GitHub from secrets/vars (no Mac .env file).
+# Env comes from secret HOSTINGER_ENV_FILE (full .env via sync-env-to-github.sh).
 
 name: Deploy
 
@@ -64,54 +64,28 @@ jobs:
       - name: Smoke SSH
         run: |
           set -euo pipefail
-          # Fail fast with a clear hint (wrong key vs network)
           if ! ssh -o ConnectTimeout=15 -o BatchMode=yes hostinger-vps 'uname -a'; then
-            echo "::error::SSH failed. On VPS Terminal run: mkdir -p /root/.ssh && echo YOUR_hostinger_gha.pub >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && systemctl enable --now ssh"
-            echo "::error::Confirm GitHub secret HOSTINGER_SSH_KEY is the private key that matches the public key on the VPS."
+            echo "::error::SSH failed. On VPS Terminal: mkdir -p /root/.ssh && echo YOUR_hostinger_gha.pub >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && systemctl enable --now ssh"
+            echo "::error::Confirm GitHub secret HOSTINGER_SSH_KEY matches the public key on the VPS."
             exit 1
           fi
 
-
-      - name: Build .env.production from GitHub secrets
+      - name: Build .env.production from synced .env
         env:
-          # Required
-          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
-          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
-          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
-          # Optional product keys
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
-          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
-          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-          IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
-          IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
-          IMAGEKIT_URL_ENDPOINT: ${{ secrets.IMAGEKIT_URL_ENDPOINT }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          MSG91_AUTH_KEY: ${{ secrets.MSG91_AUTH_KEY }}
-          MSG91_TEMPLATE_ID: ${{ secrets.MSG91_TEMPLATE_ID }}
-          # Non-secret overrides (Settings → Variables)
-          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
-          AUTH_PUBLIC_BASE_URL: ${{ vars.AUTH_PUBLIC_BASE_URL }}
-          API_DOMAIN: ${{ vars.API_DOMAIN }}
-          BAKERY_NAME: ${{ vars.BAKERY_NAME }}
-          BAKERY_PHONE: ${{ vars.BAKERY_PHONE }}
-          BAKERY_UPI_ID: ${{ vars.BAKERY_UPI_ID }}
-          CERTBOT_EMAIL_VAR: ${{ vars.CERTBOT_EMAIL }}
+          HOSTINGER_ENV_FILE: ${{ secrets.HOSTINGER_ENV_FILE }}
         run: |
           set -euo pipefail
-          # Allow CERTBOT_EMAIL from Variables if secret empty
-          if [[ -z "${CERTBOT_EMAIL:-}" && -n "${CERTBOT_EMAIL_VAR:-}" ]]; then
-            export CERTBOT_EMAIL="$CERTBOT_EMAIL_VAR"
+          if [[ -z "${HOSTINGER_ENV_FILE:-}" ]]; then
+            echo "::error::Missing secret HOSTINGER_ENV_FILE. On your Mac: cd backend_v2 && ./deploy/hostinger/sync-env-to-github.sh"
+            exit 1
           fi
-          chmod +x deploy/hostinger/render-env.sh
-          ./deploy/hostinger/render-env.sh
+          printf '%s\n' "$HOSTINGER_ENV_FILE" | tr -d '\r' > .env.production
+          chmod 600 .env.production
+          KEYS="$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' .env.production || true)"
+          echo "Using HOSTINGER_ENV_FILE (${KEYS} keys)"
+          grep -qE '^ENV=production' .env.production || echo "::warning::ENV is not production — re-run sync-env-to-github.sh"
+          grep -qE '^DATABASE_URL=.*@mysql:' .env.production || echo "::warning::DATABASE_URL should use host mysql"
+          grep -qE '^REDIS_URL=redis://redis:' .env.production || echo "::warning::REDIS_URL should use redis://redis:6379/0"
 
       - name: Deploy
         env:

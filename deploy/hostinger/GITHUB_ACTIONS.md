@@ -55,27 +55,70 @@ cd /opt/sweetcrust/backend_v2
 
 ---
 
-## Part B — One-time GitHub setup
+## Part B — One-time GitHub secrets
 
-### B1. Open secrets
-https://github.com/kanhasahu955/sweetcrust_api/settings/secrets/actions  
-→ **New repository secret** for each:
+### B1. Install GitHub CLI and login (once)
 
-| Secret name | Value |
-|-------------|--------|
-| `HOSTINGER_HOST` | `145.223.21.127` |
-| `HOSTINGER_USER` | `root` |
-| `HOSTINGER_SSH_KEY` | Full **private** key (`cat ~/.ssh/hostinger_gha` — BEGIN…END) |
-| `MYSQL_ROOT_PASSWORD` | strong password |
-| `MYSQL_PASSWORD` | strong password |
-| `JWT_SECRET_KEY` | long random string |
-| `CERTBOT_EMAIL` | your email |
+```bash
+brew install gh
+gh auth login
+```
 
-Optional later: `GROQ_API_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, etc.
+### B2. Upload your full local `.env` (recommended)
 
-### B2. Confirm workflow exists
-File in repo: `.github/workflows/deploy.yml`  
-Trigger: **push to `main`** (and manual Run workflow).
+Takes **all** keys from `backend_v2/.env`, applies production overrides
+(`ENV=production`, Docker MySQL/Redis, `AUTH_PUBLIC_BASE_URL`, clears `OTP_DEV_CODE`,
+adds `MYSQL_*` if missing), and stores the result as one GitHub secret:
+
+```bash
+cd backend_v2
+chmod +x deploy/hostinger/sync-env-to-github.sh
+./deploy/hostinger/sync-env-to-github.sh
+# or: make secrets-sync-env CERTBOT_EMAIL=you@example.com
+# or: ./deploy/hostinger/sync-env-to-github.sh --src=.env --email=you@example.com
+```
+
+| Secret | Source |
+|--------|--------|
+| `HOSTINGER_ENV_FILE` | full production env (all keys from your `.env`) |
+
+Also keep SSH secrets (`HOSTINGER_HOST`, `HOSTINGER_USER`, `HOSTINGER_SSH_KEY`).
+
+Re-run the sync script whenever you change local `.env` and want production updated.
+
+### B2b. Alternative: generate only required secrets
+
+```bash
+cd backend_v2
+./deploy/hostinger/bootstrap-github-secrets.sh --email you@example.com
+```
+
+This sets on GitHub (repo `kanhasahu955/sweetcrust_api`):
+
+| Secret | Source |
+|--------|--------|
+| `HOSTINGER_HOST` / `HOSTINGER_USER` | defaults |
+| `HOSTINGER_SSH_KEY` | `~/.ssh/hostinger_gha` |
+| `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` / `JWT_SECRET_KEY` | random (openssl) |
+| `CERTBOT_EMAIL` | `--email` |
+
+Rotate later: `./deploy/hostinger/bootstrap-github-secrets.sh --email you@example.com --force`  
+(only if you also reset MySQL volume — rotating DB password breaks existing DB.)
+
+Optional API keys (manual in GitHub UI): `GROQ_API_KEY`, `RAZORPAY_*`, etc.
+
+### B3. How deploy uses them (automatic)
+
+On every `git push origin main`, Actions:
+
+1. Reads secrets → `render-env.sh` → builds `.env.production`
+2. Uploads that file to `/opt/sweetcrust/backend_v2/.env.production`
+3. Runs `docker compose up -d --build`
+
+You never keep a production `.env` on your Mac.
+
+### B4. Confirm workflow exists
+File: `.github/workflows/deploy.yml` — trigger **push to `main`**.
 
 ---
 

@@ -32,8 +32,11 @@ LLM_MODEL="${LLM_MODEL:-llama-3.3-70b-versatile}"
 DELIVERY_RADIUS_KM="${DELIVERY_RADIUS_KM:-100}"
 MSG91_SENDER_ID="${MSG91_SENDER_ID:-SWEETCRUST}"
 
-# URL-encode is skipped; passwords should avoid @ : / ? # characters or set DATABASE_URL explicitly
-DATABASE_URL="${DATABASE_URL:-mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}}"
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  # URL-encode password so special chars don't break the DSN
+  ENC_PASS="$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["MYSQL_PASSWORD"], safe=""))')"
+  DATABASE_URL="mysql+pymysql://${MYSQL_USER}:${ENC_PASS}@mysql:3306/${MYSQL_DATABASE}"
+fi
 
 umask 077
 cat >"$OUT" <<EOF

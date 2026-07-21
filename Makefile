@@ -43,3 +43,11 @@ prod-deploy:
 
 prod-cert:
 	./deploy/hostinger/issue-cert.sh
+
+# Generate MYSQL/JWT/CERTBOT (+ Hostinger SSH) secrets into GitHub via `gh`
+secrets-bootstrap:
+	./deploy/hostinger/bootstrap-github-secrets.sh --email "$(CERTBOT_EMAIL)"
+
+# Upload entire local .env → GitHub secret HOSTINGER_ENV_FILE (used by Deploy)
+secrets-sync-env:
+	./deploy/hostinger/sync-env-to-github.sh --email "$(CERTBOT_EMAIL)"
