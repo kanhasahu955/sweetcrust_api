@@ -49,9 +49,13 @@ ensure_active_nginx() {
   if [[ ! -f nginx/nginx.prod.active.conf ]]; then
     cp nginx/nginx.prod.bootstrap.conf nginx/nginx.prod.active.conf
   fi
-  # Prefer primary API domain cert; fall back to legacy bakerywala cert
+  # Prefer API+admin TLS config when certs exist
   if [[ -f nginx/certbot/conf/live/api.skbakery.in/fullchain.pem ]]; then
-    cp nginx/nginx.prod.conf nginx/nginx.prod.active.conf
+    if [[ -f nginx/certbot/conf/live/admin.skbakery.in/fullchain.pem && -f nginx/nginx.prod.with-admin.conf ]]; then
+      cp nginx/nginx.prod.with-admin.conf nginx/nginx.prod.active.conf
+    else
+      cp nginx/nginx.prod.conf nginx/nginx.prod.active.conf
+    fi
   elif [[ -f nginx/certbot/conf/live/api.bakerywala.cloud/fullchain.pem ]]; then
     sed 's|api\.skbakery\.in|api.bakerywala.cloud|g' nginx/nginx.prod.conf > nginx/nginx.prod.active.conf
   fi

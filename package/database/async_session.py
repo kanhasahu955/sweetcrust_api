@@ -108,6 +108,17 @@ def _migrate_columns_sync(conn) -> None:
         "CREATE INDEX ix_products_brand_name ON products (brand_name)",
         "CREATE INDEX ix_products_supplier_user_id ON products (supplier_user_id)",
         "CREATE INDEX ix_orders_shop_user_id ON orders (shop_user_id)",
+        # users — create_all does not add columns to existing tables
+        "ALTER TABLE users ADD COLUMN email_verified TINYINT(1) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN terms_accepted TINYINT(1) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN biometric_enabled TINYINT(1) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN segment VARCHAR(40) NULL",
+        "ALTER TABLE users ADD COLUMN notes TEXT NULL",
+        "ALTER TABLE users ADD COLUMN total_orders INT NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN total_spent DOUBLE NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN last_order_at DATETIME NULL",
+        "ALTER TABLE users ADD COLUMN is_online TINYINT(1) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN last_seen_at DATETIME NULL",
     ]
     for sql in alters:
         try:
