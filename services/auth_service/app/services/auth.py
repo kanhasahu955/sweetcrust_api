@@ -55,7 +55,11 @@ def _otp_code() -> str:
 def _issue_tokens(session: Session, user: User) -> dict:
     presence.set_online(session, user.id)
     if user.email:
-        send_login_notice(user.email, user.name)
+        try:
+            send_login_notice(user.email, user.name)
+        except Exception:
+            # Login must not 500 if SMTP flaps after AUTH_MAIL_NOTIFY_ON_LOGIN.
+            pass
     tokens = create_token_pair(user.id, user.role.value)
     tokens["user"] = _user_dict(user)
     return tokens
