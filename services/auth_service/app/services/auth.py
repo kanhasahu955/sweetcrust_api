@@ -290,12 +290,13 @@ def admin_register(session: Session, name: str, phone: str, email: str, password
     redis_set(f"otp:admin_confirm:{phone}", code, settings.otp_expire_minutes * 60)
 
     mail_sent = send_admin_confirm_email(email, code, name)
+    # Always return code for first-admin bootstrap — SMTP can "succeed" while Gmail drops the mail.
     return {
         "message": "Admin registered. Confirm the code sent to your email before signing in.",
         "email": email,
         "phone": phone,
         "email_sent": mail_sent,
-        "dev_code": code if settings.is_dev or not mail_sent else None,
+        "dev_code": code,
     }
 
 
