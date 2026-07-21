@@ -1,9 +1,5 @@
-# Deploy THIS repo (backend_v2) → Hostinger VPS
-# Repo root must be backend_v2 (not the monorepo).
-#
-# Secrets: HOSTINGER_HOST, HOSTINGER_USER, HOSTINGER_SSH_KEY
-# Optional: HOSTINGER_SSH_PORT (default 22)
-# .env.production stays on the VPS only.
+# Deploy backend_v2 → Hostinger VPS
+# Env is built in GitHub from secrets/vars (no Mac .env file).
 
 name: Deploy
 
@@ -66,7 +62,48 @@ jobs:
           chmod 600 ~/.ssh/config
 
       - name: Smoke SSH
-        run: ssh hostinger-vps 'uname -a && command -v docker && docker compose version'
+        run: ssh hostinger-vps 'uname -a'
+
+      - name: Build .env.production from GitHub secrets
+        env:
+          # Required
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+          # Optional product keys
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          IMAGEKIT_PUBLIC_KEY: ${{ secrets.IMAGEKIT_PUBLIC_KEY }}
+          IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
+          IMAGEKIT_URL_ENDPOINT: ${{ secrets.IMAGEKIT_URL_ENDPOINT }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MSG91_AUTH_KEY: ${{ secrets.MSG91_AUTH_KEY }}
+          MSG91_TEMPLATE_ID: ${{ secrets.MSG91_TEMPLATE_ID }}
+          # Non-secret overrides (Settings → Variables)
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          AUTH_PUBLIC_BASE_URL: ${{ vars.AUTH_PUBLIC_BASE_URL }}
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+          BAKERY_NAME: ${{ vars.BAKERY_NAME }}
+          BAKERY_PHONE: ${{ vars.BAKERY_PHONE }}
+          BAKERY_UPI_ID: ${{ vars.BAKERY_UPI_ID }}
+          CERTBOT_EMAIL_VAR: ${{ vars.CERTBOT_EMAIL }}
+        run: |
+          set -euo pipefail
+          # Allow CERTBOT_EMAIL from Variables if secret empty
+          if [[ -z "${CERTBOT_EMAIL:-}" && -n "${CERTBOT_EMAIL_VAR:-}" ]]; then
+            export CERTBOT_EMAIL="$CERTBOT_EMAIL_VAR"
+          fi
+          chmod +x deploy/hostinger/render-env.sh
+          ./deploy/hostinger/render-env.sh
 
       - name: Deploy
         env:

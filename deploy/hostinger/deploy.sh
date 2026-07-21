@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Deploy backend_v2 to Hostinger VPS over SSH/rsync, then compose up.
 #
-# Laptop (pushes .env.production):
+# Laptop (pushes local .env.production):
 #   ./deploy/hostinger/deploy.sh
 #
-# GitHub Actions / CI (never overwrites server .env.production):
+# GitHub Actions — dynamic env from secret HOSTINGER_ENV_FILE (written to .env.production before this runs):
 #   ./deploy/hostinger/deploy.sh --ci
 #
 # Already on the server:
@@ -37,7 +37,7 @@ REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
 
 need_env() {
   if [[ ! -f .env.production ]]; then
-    echo "Missing .env.production — copy .env.production.example and fill secrets." >&2
+    echo "Missing .env.production — set GitHub secret HOSTINGER_ENV_FILE or copy .env.production.example." >&2
     exit 1
   fi
   if grep -q 'CHANGE_ME' .env.production; then
@@ -77,7 +77,6 @@ compose_up() {
 }
 
 rsync_code() {
-  # Never delete server secrets / TLS material with --delete
   rsync -az --delete \
     --exclude '.venv/' \
     --exclude 'node_modules/' \
@@ -96,6 +95,13 @@ rsync_code() {
     ./ "${REMOTE}:${DEPLOY_PATH}/"
 }
 
+upload_env() {
+  need_env
+  echo "Uploading .env.production → ${REMOTE}:${DEPLOY_PATH}/"
+  scp -q .env.production "${REMOTE}:${DEPLOY_PATH}/.env.production"
+  ssh "${REMOTE}" "chmod 600 '${DEPLOY_PATH}/.env.production'"
+}
+
 remote_compose() {
   ssh "${REMOTE}" "bash -s" <<EOF
 set -euo pipefail
@@ -105,7 +111,7 @@ if ! command -v docker >/dev/null; then
   bash deploy/hostinger/setup-vps.sh
 fi
 if [[ ! -f .env.production ]]; then
-  echo "Server missing ${DEPLOY_PATH}/.env.production — copy .env.production.example once and fill secrets." >&2
+  echo "Server missing ${DEPLOY_PATH}/.env.production — add GitHub secret HOSTINGER_ENV_FILE and redeploy." >&2
   exit 1
 fi
 SKIP_BUILD='${SKIP_BUILD}' ./deploy/hostinger/deploy.sh --local
@@ -121,12 +127,13 @@ echo "Rsync → ${REMOTE}:${DEPLOY_PATH}"
 ssh -o StrictHostKeyChecking=accept-new "${REMOTE}" "mkdir -p '${DEPLOY_PATH}'"
 rsync_code
 
-if [[ "$CI" -eq 0 ]]; then
-  need_env
-  echo "Uploading .env.production"
-  scp -q .env.production "${REMOTE}:${DEPLOY_PATH}/.env.production"
+if [[ -f .env.production ]]; then
+  upload_env
+elif [[ "$CI" -eq 1 ]]; then
+  echo "CI: no .env.production on runner — keeping existing file on VPS (if any)"
 else
-  echo "CI mode: keeping server .env.production (not overwritten)"
+  echo "Missing local .env.production" >&2
+  exit 1
 fi
 
 remote_compose

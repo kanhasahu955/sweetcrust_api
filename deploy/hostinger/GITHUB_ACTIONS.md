@@ -1,74 +1,177 @@
-# GitHub Actions → Hostinger (backend_v2 only)
+# Step-by-step: GitHub → Hostinger VPS (backend_v2)
 
-Deploys **only this backend** (`backend_v2`). No admin, mobile, or other apps.
+Repo: https://github.com/kanhasahu955/sweetcrust_api  
+VPS: `145.223.21.127` (`srv1458436.hstgr.cloud`)  
+API folder on server: `/opt/sweetcrust/backend_v2`  
+Public URL: `https://api.bakerywala.cloud`
 
-Workflow: [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml)
-
-| Trigger | When |
-|---------|------|
-| `push` to `main` / `master` | Any commit in this repo |
-| `workflow_dispatch` | Manual run (optional skip rebuild) |
-
-```mermaid
-flowchart LR
-  Push[push_main] --> GHA[GitHub_Actions]
-  GHA --> SSH[SSH_rsync]
-  SSH --> VPS[Hostinger_VPS]
-  VPS --> Compose[docker_compose_up]
-  Compose --> Health[gateway_health]
+```text
+You (code) → git push main → GitHub Actions → SSH/rsync → VPS folder → Docker Compose → API live
 ```
 
-## 0. Create a GitHub repo from `backend_v2` only
+---
 
-```bash
-cd /Users/ashok-sahu/my_applications/bakerywala_2026/backend_v2
-git init -b main
-git add .
-git commit -m "backend_v2 production + Hostinger CI/CD"
-gh repo create sweetcrust-backend-v2 --private --source=. --remote=origin --push
-# or: git remote add origin git@github.com:YOU/sweetcrust-backend-v2.git && git push -u origin main
-```
+## Part A — One-time Hostinger setup
 
-Repo root = `backend_v2` (contains `.github/workflows/deploy.yml`, `docker-compose.prod.yml`, `deploy/`).
+### A1. VPS is running
+hPanel → **VPS** → `srv1458436` → status **Running**.
 
-## 1. Deploy SSH key
+### A2. Firewall
+hPanel → VPS → **Security → Firewall** → create/sync rules:
+
+| Action | Protocol | Port | Source |
+|--------|----------|------|--------|
+| Accept | TCP | 22 | Anywhere |
+| Accept | TCP | 80 | Anywhere |
+| Accept | TCP | 443 | Anywhere |
+| Drop | Any | Any | Anywhere |
+
+Click **Synchronize** and wait until it finishes.
+
+### A3. SSH key for GitHub deploy
+On your Mac (once):
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-hostinger" -f ~/.ssh/hostinger_gha -N ""
-ssh-copy-id -i ~/.ssh/hostinger_gha.pub root@145.223.21.127
+cat ~/.ssh/hostinger_gha.pub
 ```
 
-## 2. GitHub secrets
+On Hostinger:
+1. VPS → **SSH keys** → add that **public** key (`.pub` line), **or**
+2. Open **Terminal** and run:
 
-Repo → **Settings → Secrets and variables → Actions**:
+```bash
+mkdir -p /root/.ssh && chmod 700 /root/.ssh
+echo 'PASTE_YOUR_hostinger_gha.pub_LINE_HERE' >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+```
 
-| Secret | Example |
-|--------|---------|
+### A4. API folder (optional — deploy also creates it)
+
+```bash
+mkdir -p /opt/sweetcrust/backend_v2
+cd /opt/sweetcrust/backend_v2
+```
+
+---
+
+## Part B — One-time GitHub setup
+
+### B1. Open secrets
+https://github.com/kanhasahu955/sweetcrust_api/settings/secrets/actions  
+→ **New repository secret** for each:
+
+| Secret name | Value |
+|-------------|--------|
 | `HOSTINGER_HOST` | `145.223.21.127` |
 | `HOSTINGER_USER` | `root` |
-| `HOSTINGER_SSH_KEY` | Full private key from `~/.ssh/hostinger_gha` |
-| `HOSTINGER_SSH_PORT` | `22` (optional) |
+| `HOSTINGER_SSH_KEY` | Full **private** key (`cat ~/.ssh/hostinger_gha` — BEGIN…END) |
+| `MYSQL_ROOT_PASSWORD` | strong password |
+| `MYSQL_PASSWORD` | strong password |
+| `JWT_SECRET_KEY` | long random string |
+| `CERTBOT_EMAIL` | your email |
 
-Keep `.env.production` **on the VPS only** — not in GitHub.
+Optional later: `GROQ_API_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, etc.
 
-## 3. One-time on the VPS
+### B2. Confirm workflow exists
+File in repo: `.github/workflows/deploy.yml`  
+Trigger: **push to `main`** (and manual Run workflow).
+
+---
+
+## Part C — Everyday work (this is the loop)
+
+### C1. Change code on your machine
 
 ```bash
-bash deploy/hostinger/setup-vps.sh   # if Docker missing
-# After first deploy sync:
+cd /path/to/backend_v2
+# edit files…
+```
+
+### C2. Commit and push to main
+
+```bash
+git add -A
+git status
+git commit -m "Describe your change"
+git push origin main
+```
+
+### C3. Watch deploy
+GitHub → **Actions** → workflow **Deploy** → open the latest run (green = OK).
+
+What it does automatically:
+1. Builds `.env.production` from GitHub secrets  
+2. Copies code to `/opt/sweetcrust/backend_v2`  
+3. Runs `docker compose up -d --build`  
+4. Checks `http://VPS/gateway/health`
+
+### C4. Change an env var (no Mac file)
+GitHub → **Settings → Secrets** → edit e.g. `MYSQL_PASSWORD` or `GROQ_API_KEY`  
+→ **Actions → Deploy → Run workflow** (or any small push to `main`).
+
+---
+
+## Part D — First successful deploy extras
+
+### D1. Check API (HTTP)
+```bash
+curl -fsS http://145.223.21.127/gateway/health
+curl -fsS http://145.223.21.127/api/v1/customer/settings
+```
+
+### D2. Enable HTTPS (once, on VPS Terminal)
+```bash
 cd /opt/sweetcrust/backend_v2
-cp .env.production.example .env.production
-nano .env.production                 # fill secrets
-./deploy/hostinger/issue-cert.sh     # TLS for api.bakerywala.cloud
+./deploy/hostinger/issue-cert.sh
 ```
 
-## 4. Day-to-day
+Then:
+```bash
+curl -fsS https://api.bakerywala.cloud/gateway/health
+```
+
+### D3. Point apps at production
+- Mobile: `EXPO_PUBLIC_API_URL=https://api.bakerywala.cloud`
+- Admin: API base `https://api.bakerywala.cloud`
+
+---
+
+## Part E — Useful VPS commands
 
 ```bash
-cd backend_v2
-git add -A && git commit -m "…" && git push origin main
+cd /opt/sweetcrust/backend_v2
+
+# status
+docker compose -f docker-compose.prod.yml --env-file .env.production ps
+
+# logs
+docker compose -f docker-compose.prod.yml --env-file .env.production logs -f gateway nginx
+
+# restart one service
+docker compose -f docker-compose.prod.yml --env-file .env.production restart auth
 ```
 
-Actions → **Deploy** runs rsync + `docker compose up -d --build` + health check.
+---
 
-Manual: Actions → **Deploy** → **Run workflow**.
+## If deploy fails
+
+| Failure | Fix |
+|---------|-----|
+| Smoke SSH / timeout | Firewall sync + SSH pubkey on VPS |
+| Missing MYSQL_/JWT_/CERTBOT_ | Add those GitHub secrets |
+| Missing `.env.production` | Secrets incomplete — check Actions log “Build .env.production” |
+| Health check failed | On VPS: `docker compose … logs --tail=100` |
+| Docker missing | First deploy runs `setup-vps.sh`; or install Docker in Terminal |
+
+---
+
+## Checklist (print this)
+
+- [ ] Firewall 22/80/443 synced  
+- [ ] SSH public key on VPS  
+- [ ] GitHub secrets: HOSTINGER_* + MYSQL_* + JWT + CERTBOT_EMAIL  
+- [ ] Workflow on `main`  
+- [ ] `git push origin main` → Actions green  
+- [ ] `curl http://145.223.21.127/gateway/health` OK  
+- [ ] `issue-cert.sh` for HTTPS  
