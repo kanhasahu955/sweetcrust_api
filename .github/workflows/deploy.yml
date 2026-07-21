@@ -62,7 +62,15 @@ jobs:
           chmod 600 ~/.ssh/config
 
       - name: Smoke SSH
-        run: ssh hostinger-vps 'uname -a'
+        run: |
+          set -euo pipefail
+          # Fail fast with a clear hint (wrong key vs network)
+          if ! ssh -o ConnectTimeout=15 -o BatchMode=yes hostinger-vps 'uname -a'; then
+            echo "::error::SSH failed. On VPS Terminal run: mkdir -p /root/.ssh && echo YOUR_hostinger_gha.pub >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && systemctl enable --now ssh"
+            echo "::error::Confirm GitHub secret HOSTINGER_SSH_KEY is the private key that matches the public key on the VPS."
+            exit 1
+          fi
+
 
       - name: Build .env.production from GitHub secrets
         env:
