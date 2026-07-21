@@ -2,7 +2,7 @@
  * Socket.IO realtime — JWT auth + Redis fan-out from FastAPI services.
  * Channels must match package/events/topics.py.
  */
-import './loadEnv'
+import './loadEnv.js'
 import { createHmac } from 'node:crypto'
 import Fastify from 'fastify'
 import { Redis } from 'ioredis'

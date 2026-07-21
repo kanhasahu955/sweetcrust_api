@@ -22,9 +22,10 @@ need CERTBOT_EMAIL
 MYSQL_DATABASE="${MYSQL_DATABASE:-sweetcrust}"
 MYSQL_USER="${MYSQL_USER:-sweetcrust}"
 APP_NAME="${APP_NAME:-SweetCrust Bakery}"
-AUTH_PUBLIC_BASE_URL="${AUTH_PUBLIC_BASE_URL:-https://api.bakerywala.cloud}"
-CORS_ORIGINS="${CORS_ORIGINS:-https://admin.bakerywala.cloud,https://store.bakerywala.cloud,https://bakerywala.cloud,https://www.bakerywala.cloud}"
-API_DOMAIN="${API_DOMAIN:-api.bakerywala.cloud}"
+AUTH_PUBLIC_BASE_URL="${AUTH_PUBLIC_BASE_URL:-https://api.skbakery.in}"
+CORS_ORIGINS="${CORS_ORIGINS:-https://skbakery.in,https://www.skbakery.in,https://admin.skbakery.in,https://store.skbakery.in,https://admin.bakerywala.cloud,https://store.bakerywala.cloud,https://bakerywala.cloud,https://www.bakerywala.cloud}"
+API_DOMAIN="${API_DOMAIN:-api.skbakery.in}"
+EXTRA_API_DOMAINS="${EXTRA_API_DOMAINS:-api.bakerywala.cloud}"
 BAKERY_NAME="${BAKERY_NAME:-SweetCrust Bakery}"
 BAKERY_PHONE="${BAKERY_PHONE:-+919876543210}"
 LLM_PROVIDER="${LLM_PROVIDER:-groq}"
@@ -104,6 +105,7 @@ MSG91_TEMPLATE_ID=${MSG91_TEMPLATE_ID:-}
 MSG91_SENDER_ID=${MSG91_SENDER_ID}
 
 API_DOMAIN=${API_DOMAIN}
+EXTRA_API_DOMAINS=${EXTRA_API_DOMAINS}
 CERTBOT_EMAIL=${CERTBOT_EMAIL}
 DEPLOY_HOST=${DEPLOY_HOST:-145.223.21.127}
 DEPLOY_USER=${DEPLOY_USER:-root}

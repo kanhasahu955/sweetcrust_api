@@ -49,8 +49,11 @@ ensure_active_nginx() {
   if [[ ! -f nginx/nginx.prod.active.conf ]]; then
     cp nginx/nginx.prod.bootstrap.conf nginx/nginx.prod.active.conf
   fi
-  if [[ -f nginx/certbot/conf/live/api.bakerywala.cloud/fullchain.pem ]]; then
+  # Prefer primary API domain cert; fall back to legacy bakerywala cert
+  if [[ -f nginx/certbot/conf/live/api.skbakery.in/fullchain.pem ]]; then
     cp nginx/nginx.prod.conf nginx/nginx.prod.active.conf
+  elif [[ -f nginx/certbot/conf/live/api.bakerywala.cloud/fullchain.pem ]]; then
+    sed 's|api\.skbakery\.in|api.bakerywala.cloud|g' nginx/nginx.prod.conf > nginx/nginx.prod.active.conf
   fi
 }
 
@@ -140,4 +143,4 @@ remote_compose
 
 echo "Deploy finished. Issue TLS if needed:"
 echo "  ssh ${REMOTE} 'cd ${DEPLOY_PATH} && ./deploy/hostinger/issue-cert.sh'"
-echo "Health: http://${DEPLOY_HOST}/gateway/health  →  https://api.bakerywala.cloud/gateway/health"
+echo "Health: http://${DEPLOY_HOST}/gateway/health  →  https://api.skbakery.in/gateway/health"
