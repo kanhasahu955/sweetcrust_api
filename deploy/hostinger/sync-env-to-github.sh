@@ -55,12 +55,27 @@ trap 'rm -f "$TMP"' EXIT
 # Copy source .env (strip CR)
 tr -d '\r' <"$SRC" >"$TMP"
 
-# Ensure MySQL app password exists (needed for Docker mysql service)
+# Prefer MySQL/JWT already used in production — NEVER rotate after first MySQL boot
+# (volume keeps the old password; new random keys cause Access denied / crash loops).
+for f in .env.production .env.mysql; do
+  if [[ -f "$f" ]]; then
+    for key in MYSQL_ROOT_PASSWORD MYSQL_PASSWORD MYSQL_USER MYSQL_DATABASE JWT_SECRET_KEY; do
+      if ! grep -qE "^${key}=.+" "$TMP"; then
+        val="$(grep -E "^${key}=" "$f" | head -1 || true)"
+        [[ -n "$val" ]] && echo "$val" >>"$TMP"
+      fi
+    done
+  fi
+done
+
+# Only generate MySQL passwords when truly missing (first-ever setup)
 if ! grep -qE '^MYSQL_PASSWORD=.+' "$TMP"; then
   echo "MYSQL_PASSWORD=$(rand)" >>"$TMP"
+  echo "NOTE: generated new MYSQL_PASSWORD — if MySQL volume already exists, run fix-mysql-password.sh or recreate the volume." >&2
 fi
 if ! grep -qE '^MYSQL_ROOT_PASSWORD=.+' "$TMP"; then
   echo "MYSQL_ROOT_PASSWORD=$(rand)" >>"$TMP"
+  echo "NOTE: generated new MYSQL_ROOT_PASSWORD — do not re-sync after first boot without preserving these." >&2
 fi
 if ! grep -qE '^MYSQL_USER=.+' "$TMP"; then
   echo "MYSQL_USER=sweetcrust" >>"$TMP"

@@ -22,7 +22,6 @@ const SERVICES: {
   { name: 'picking', port: 8014, prefixes: ['/api/v1/admin/picking', '/api/v1/picking'] },
   { name: 'checkout', port: 8015, prefixes: ['/api/v1/customer/checkout'] },
   { name: 'order', port: 8016, prefixes: ['/api/v1/customer/orders', '/api/v1/customer/custom-cakes', '/api/v1/customer/returns'] },
-  { name: 'invoice', port: 8017, prefixes: ['(via order paths on gateway)'] },
   { name: 'location', port: 8018, prefixes: ['/api/v1/geo', '/api/v1/customer/addresses'] },
   { name: 'dispatch', port: 8019, prefixes: ['/api/v1/admin/delivery/live'] },
   { name: 'tracking', port: 8020, prefixes: ['/api/v1/customer/track'] },
@@ -35,17 +34,23 @@ const SERVICES: {
   { name: 'commerce', port: 8027, prefixes: ['/api/v1/customer (wallet/referral residual)'] },
 ]
 
-function portalHtml(): string {
+function publicBase(reqHost?: string): string {
+  const fromEnv = (process.env.AUTH_PUBLIC_BASE_URL || '').replace(/\/$/, '')
+  if (fromEnv) return fromEnv
+  if (reqHost) {
+    const proto = process.env.ENV === 'production' ? 'https' : 'http'
+    return `${proto}://${reqHost}`
+  }
+  return 'http://127.0.0.1:8080'
+}
+
+function portalHtml(base: string): string {
   const rows = SERVICES.map((s) => {
-    const docs = `http://127.0.0.1:${s.port}/docs`
-    const health = `http://127.0.0.1:${s.port}/health`
     const prefixes = s.prefixes.map((p) => `<code>${p}</code>`).join('<br>')
     return `<tr>
       <td><strong>${s.name}</strong></td>
-      <td>:${s.port}</td>
+      <td>docker :${s.port}</td>
       <td>${prefixes}</td>
-      <td><a href="${docs}" target="_blank" rel="noreferrer">OpenAPI /docs</a></td>
-      <td><a href="${health}" target="_blank" rel="noreferrer">/health</a></td>
     </tr>`
   }).join('\n')
 
@@ -73,17 +78,18 @@ function portalHtml(): string {
 <body>
   <h1>SweetCrust gateway — all microservices</h1>
   <p>
-    The gateway (<code>:8080</code>) is a Fastify proxy. It does not own one combined Swagger UI.
-    Call APIs through <code>http://127.0.0.1:8080/api/v1/…</code>; open each service’s docs below for schemas.
+    Production exposes only this gateway. Call APIs at
+    <code>${base}/api/v1/…</code>.
+    Ports like <code>:8001</code> are Docker-internal — they are not available on your laptop
+    (so <code>127.0.0.1:8001</code> will always refuse).
   </p>
   <div class="note meta">
-    <a href="/gateway/health">Gateway health</a>
+    <a href="/gateway/health">Gateway + upstream map</a>
     <a href="/services">Services JSON</a>
-    <a href="http://127.0.0.1:8007/docs">store-ops Swagger (admin/retailer)</a>
   </div>
   <table>
     <thead>
-      <tr><th>Service</th><th>Port</th><th>Gateway prefixes</th><th>Docs</th><th>Health</th></tr>
+      <tr><th>Service</th><th>Internal port</th><th>Gateway prefixes</th></tr>
     </thead>
     <tbody>
       ${rows}
@@ -94,8 +100,9 @@ function portalHtml(): string {
 }
 
 const docs: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/docs', async (_req, reply) => {
-    reply.type('text/html').send(portalHtml())
+  fastify.get('/docs', async (req, reply) => {
+    const host = typeof req.headers.host === 'string' ? req.headers.host : undefined
+    reply.type('text/html').send(portalHtml(publicBase(host)))
   })
 
   fastify.get('/redoc', async (_req, reply) => {
@@ -107,25 +114,26 @@ const docs: FastifyPluginAsync = async (fastify) => {
     info: {
       title: 'SweetCrust Gateway',
       description:
-        'Proxy only — see /docs for per-service OpenAPI links. Upstream map is under /services.',
+        'Proxy only — see /docs for route map. Upstream status is under /gateway/health.',
       version: '1.0.0',
     },
     paths: {},
     'x-services': SERVICES,
   }))
 
-  fastify.get('/services', async () => ({
-    gateway: 'http://127.0.0.1:8080',
-    note: 'Hit APIs on the gateway; open each service /docs for schemas.',
-    services: SERVICES.map((s) => ({
-      name: s.name,
-      port: s.port,
-      docs: `http://127.0.0.1:${s.port}/docs`,
-      health: `http://127.0.0.1:${s.port}/health`,
-      openapi: `http://127.0.0.1:${s.port}/openapi.json`,
-      gateway_prefixes: s.prefixes,
-    })),
-  }))
+  fastify.get('/services', async (req) => {
+    const host = typeof req.headers.host === 'string' ? req.headers.host : undefined
+    const base = publicBase(host)
+    return {
+      gateway: base,
+      note: 'APIs are on the gateway only. Service ports are not public in production.',
+      services: SERVICES.map((s) => ({
+        name: s.name,
+        port: s.port,
+        gateway_prefixes: s.prefixes,
+      })),
+    }
+  })
 }
 
 export default docs
