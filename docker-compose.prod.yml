@@ -1,0 +1,474 @@
+# SweetCrust production — Hostinger VPS (api.bakerywala.cloud)
+#
+#   cp .env.production.example .env.production   # fill secrets
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#   curl -fsS https://api.bakerywala.cloud/gateway/health
+#
+# Public surface: nginx :80/:443 only. MySQL/Redis/FastAPI/gateway/realtime stay on the Docker network.
+
+x-fastapi: &fastapi
+  restart: unless-stopped
+  env_file:
+    - .env.production
+  environment: &fastapi_env
+    ENV: production
+    RELOAD: "false"
+    LOG_JSON: "true"
+    REDIS_URL: redis://redis:6379/0
+    DATABASE_URL: mysql+pymysql://${MYSQL_USER:-sweetcrust}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-sweetcrust}
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_started
+  deploy:
+    resources:
+      limits:
+        memory: 192M
+  networks:
+    - sweetcrust
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sweetcrust}
+      MYSQL_USER: ${MYSQL_USER:-sweetcrust}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./deploy/hostinger/mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    networks:
+      - sweetcrust
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+    networks:
+      - sweetcrust
+
+  auth:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/auth_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8001"
+      SERVICE_PORT: "8001"
+
+  catalog:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/catalog_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8002"
+      SERVICE_PORT: "8002"
+
+  cart:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/cart_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8003"
+      SERVICE_PORT: "8003"
+
+  payment:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/payment_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8004"
+      SERVICE_PORT: "8004"
+
+  rider:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/rider_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8005"
+      SERVICE_PORT: "8005"
+
+  ai:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/ai_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8006"
+      SERVICE_PORT: "8006"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  store_ops:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/store_ops_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8007"
+      SERVICE_PORT: "8007"
+    volumes:
+      - uploads_data:/workspace/services/store_ops_service/uploads
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  user:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/user_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8008"
+      SERVICE_PORT: "8008"
+
+  search:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/search_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8009"
+      SERVICE_PORT: "8009"
+
+  assortment:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/assortment_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8010"
+      SERVICE_PORT: "8010"
+
+  pricing:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/pricing_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8011"
+      SERVICE_PORT: "8011"
+
+  promotion:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/promotion_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8012"
+      SERVICE_PORT: "8012"
+
+  inventory:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/inventory_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8013"
+      SERVICE_PORT: "8013"
+
+  picking:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/picking_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8014"
+      SERVICE_PORT: "8014"
+
+  checkout:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/checkout_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8015"
+      SERVICE_PORT: "8015"
+
+  order:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/order_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8016"
+      SERVICE_PORT: "8016"
+
+  invoice:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/invoice_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8017"
+      SERVICE_PORT: "8017"
+
+  location:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/location_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8018"
+      SERVICE_PORT: "8018"
+
+  dispatch:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/dispatch_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8019"
+      SERVICE_PORT: "8019"
+
+  tracking:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/tracking_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8020"
+      SERVICE_PORT: "8020"
+
+  routing:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/routing_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8021"
+      SERVICE_PORT: "8021"
+
+  notification:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/notification_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8022"
+      SERVICE_PORT: "8022"
+
+  support:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/support_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8023"
+      SERVICE_PORT: "8023"
+
+  rating:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/rating_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8024"
+      SERVICE_PORT: "8024"
+
+  analytics:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/analytics_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8025"
+      SERVICE_PORT: "8025"
+
+  forecast:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/forecast_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8026"
+      SERVICE_PORT: "8026"
+
+  commerce:
+    <<: *fastapi
+    build:
+      context: .
+      dockerfile: services/commerce_service/Dockerfile
+    environment:
+      <<: *fastapi_env
+      PORT: "8027"
+      SERVICE_PORT: "8027"
+
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      AUTH_URL: http://auth:8001
+      CATALOG_URL: http://catalog:8002
+      CART_URL: http://cart:8003
+      PAYMENT_URL: http://payment:8004
+      PAYMENTS_URL: http://payment:8004
+      RIDER_URL: http://rider:8005
+      DELIVERY_URL: http://rider:8005
+      AI_URL: http://ai:8006
+      STORE_OPS_URL: http://store_ops:8007
+      ADMIN_URL: http://store_ops:8007
+      USER_URL: http://user:8008
+      SEARCH_URL: http://search:8009
+      ASSORTMENT_URL: http://assortment:8010
+      PRICING_URL: http://pricing:8011
+      PROMOTION_URL: http://promotion:8012
+      INVENTORY_URL: http://inventory:8013
+      PICKING_URL: http://picking:8014
+      CHECKOUT_URL: http://checkout:8015
+      ORDER_URL: http://order:8016
+      INVOICE_URL: http://invoice:8017
+      LOCATION_URL: http://location:8018
+      DISPATCH_URL: http://dispatch:8019
+      TRACKING_URL: http://tracking:8020
+      ROUTING_URL: http://routing:8021
+      NOTIFICATION_URL: http://notification:8022
+      SUPPORT_URL: http://support:8023
+      RATING_URL: http://rating:8024
+      ANALYTICS_URL: http://analytics:8025
+      FORECAST_URL: http://forecast:8026
+      COMMERCE_URL: http://commerce:8027
+    depends_on:
+      - auth
+      - catalog
+      - cart
+      - payment
+      - rider
+      - ai
+      - store_ops
+      - user
+      - search
+      - assortment
+      - pricing
+      - promotion
+      - inventory
+      - picking
+      - checkout
+      - order
+      - invoice
+      - location
+      - dispatch
+      - tracking
+      - routing
+      - notification
+      - support
+      - rating
+      - analytics
+      - forecast
+      - commerce
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - sweetcrust
+
+  realtime:
+    build: ./realtime
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "8081"
+      SERVICE_PORT: "8081"
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+    networks:
+      - sweetcrust
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # active = bootstrap (HTTP) until issue-cert.sh swaps in TLS config
+      - ./nginx/nginx.prod.active.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certbot/www:/var/www/certbot:ro
+      - ./nginx/certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - gateway
+      - realtime
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    networks:
+      - sweetcrust
+
+  # One-shot / renew helper — run: docker compose ... run --rm certbot renew
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - ./nginx/certbot/www:/var/www/certbot
+      - ./nginx/certbot/conf:/etc/letsencrypt
+    profiles:
+      - certbot
+    networks:
+      - sweetcrust
+
+networks:
+  sweetcrust:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  uploads_data:

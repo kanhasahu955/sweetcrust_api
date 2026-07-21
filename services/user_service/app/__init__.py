@@ -1,0 +1,1 @@
+"""SweetCrust auth service."""

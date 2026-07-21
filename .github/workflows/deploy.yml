@@ -1,0 +1,95 @@
+# Deploy THIS repo (backend_v2) → Hostinger VPS
+# Repo root must be backend_v2 (not the monorepo).
+#
+# Secrets: HOSTINGER_HOST, HOSTINGER_USER, HOSTINGER_SSH_KEY
+# Optional: HOSTINGER_SSH_PORT (default 22)
+# .env.production stays on the VPS only.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      skip_build:
+        description: "Skip --build (faster restart only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: hostinger-backend-v2
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Hostinger VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rsync
+        run: sudo apt-get update -y && sudo apt-get install -y rsync
+
+      - name: Configure SSH
+        env:
+          HOSTINGER_SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          HOSTINGER_HOST: ${{ secrets.HOSTINGER_HOST }}
+          HOSTINGER_USER: ${{ secrets.HOSTINGER_USER }}
+          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "${HOSTINGER_SSH_KEY:-}" || { echo "Missing secret HOSTINGER_SSH_KEY"; exit 1; }
+          test -n "${HOSTINGER_HOST:-}" || { echo "Missing secret HOSTINGER_HOST"; exit 1; }
+          test -n "${HOSTINGER_USER:-}" || { echo "Missing secret HOSTINGER_USER"; exit 1; }
+          PORT="${HOSTINGER_SSH_PORT:-22}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$HOSTINGER_SSH_KEY" > ~/.ssh/hostinger_deploy
+          chmod 600 ~/.ssh/hostinger_deploy
+          ssh-keyscan -p "$PORT" -H "$HOSTINGER_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          cat > ~/.ssh/config <<EOF
+          Host hostinger-vps
+            HostName ${HOSTINGER_HOST}
+            User ${HOSTINGER_USER}
+            Port ${PORT}
+            IdentityFile ~/.ssh/hostinger_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Smoke SSH
+        run: ssh hostinger-vps 'uname -a && command -v docker && docker compose version'
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: hostinger-vps
+          DEPLOY_USER: ${{ secrets.HOSTINGER_USER }}
+          DEPLOY_PATH: /opt/sweetcrust/backend_v2
+          SKIP_BUILD: ${{ inputs.skip_build && '1' || '0' }}
+        run: |
+          chmod +x deploy/hostinger/*.sh
+          ./deploy/hostinger/deploy.sh --ci
+
+      - name: Health check
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.HOSTINGER_HOST }}"
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 "http://${HOST}/gateway/health" >/dev/null; then
+              curl -fsS "http://${HOST}/gateway/health"
+              echo
+              exit 0
+            fi
+            sleep 4
+          done
+          echo "Health check failed" >&2
+          ssh hostinger-vps 'cd /opt/sweetcrust/backend_v2 && docker compose -f docker-compose.prod.yml --env-file .env.production ps'
+          exit 1

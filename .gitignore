@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.production
+.env.production.local
+.python-version
+*.egg-info/
+.DS_Store
+# uv.lock is committed — environment is reproducible via `uv sync`
+logs/
