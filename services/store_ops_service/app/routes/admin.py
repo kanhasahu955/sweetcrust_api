@@ -13,6 +13,8 @@ from app.services import shops as shop_ops
 from app.services import credit as credit_ops
 from app.services import purchases as purchase_ops
 from app.services import billing as billing_ops
+from app.services import sell as sell_ops
+from app.services import units as unit_ops
 from app.schemas.admin import BannerIn, CategoryIn, CollectIn, CouponIn, CustomCakeAdminIn, DeliveryAssignIn, DeliveryPersonIn, DeliveryPersonPatchIn, MessageIn, OrderStatusUpdateIn, ProductIn, ProductPatchIn, ReturnAdminIn, SettingsUpdateIn, ShopCreateIn, ShopPatchIn, StockUpdateIn, SupplierPayIn, SupplierPurchaseIn, SupplierRazorpayCreateIn, SupplierRazorpayVerifyIn
 from package.common.schemas import APIModel, ok
 from package.logger import get_logger
@@ -66,6 +68,7 @@ async def get_products(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     category_id: Optional[int] = Query(None, ge=1),
+    supplier_user_id: Optional[int] = Query(None, ge=1),
 ):
     return ok(
         await _domain(
@@ -75,6 +78,7 @@ async def get_products(
             page=page,
             page_size=page_size,
             category_id=category_id,
+            supplier_user_id=supplier_user_id,
         )
     )
 
@@ -101,6 +105,11 @@ async def patch_stock(product_id: int, body: StockUpdateIn, session: AsyncSessio
 @router.post('/products/ai-upload/publish')
 async def publish_ai(session: AsyncSessionDep, admin: AdminUser, body: dict=Body(...)):
     return ok(await _domain(session, product_ops.publish_ai_product, body, admin.id))
+
+@router.get('/units')
+async def get_units(_: AdminUser):
+    return ok(unit_ops.list_units())
+
 
 @router.get('/categories')
 async def get_categories(session: AsyncSessionDep, _: AdminUser, active_only: bool=False):
@@ -202,6 +211,15 @@ async def approve_shop(retailer_user_id: int, session: AsyncSessionDep, _: Admin
 async def reject_shop(retailer_user_id: int, session: AsyncSessionDep, _: AdminUser):
     return ok(await _domain(session, shop_ops.reject_shop, retailer_user_id))
 
+
+class SellSubIn(APIModel):
+    status: str = "approved"
+
+
+@router.post('/shops/{retailer_user_id}/sell-subscription')
+async def set_sell_subscription(retailer_user_id: int, body: SellSubIn, session: AsyncSessionDep, _: AdminUser):
+    return ok(await _domain(session, shop_ops.set_sell_subscription, retailer_user_id, body.status))
+
 @router.patch('/shops/{retailer_user_id}')
 async def patch_shop(retailer_user_id: int, body: ShopPatchIn, session: AsyncSessionDep, _: AdminUser):
     return ok(await _domain(session, shop_ops.patch_shop, retailer_user_id, body))
@@ -213,6 +231,29 @@ async def get_ledger(retailer_user_id: int, session: AsyncSessionDep, _: AdminUs
 @router.get('/shops/{retailer_user_id}/account')
 async def get_shop_account(retailer_user_id: int, session: AsyncSessionDep, _: AdminUser):
     return ok(await _domain(session, billing_ops.admin_shop_account, retailer_user_id))
+
+@router.get('/shops/{retailer_user_id}/catalog')
+async def get_shop_catalog(retailer_user_id: int, session: AsyncSessionDep, _: AdminUser):
+    return ok(await _domain(session, sell_ops.admin_shop_catalog, retailer_user_id))
+
+class ShopToggleIn(APIModel):
+    is_active: bool = True
+
+@router.patch('/shops/{retailer_user_id}/banners/{banner_id}')
+async def patch_shop_banner(
+    retailer_user_id: int, banner_id: int, body: ShopToggleIn, session: AsyncSessionDep, _: AdminUser
+):
+    return ok(
+        await _domain(session, sell_ops.admin_set_shop_banner_active, banner_id, retailer_user_id, body.is_active)
+    )
+
+@router.patch('/shops/{retailer_user_id}/coupons/{coupon_id}')
+async def patch_shop_coupon(
+    retailer_user_id: int, coupon_id: int, body: ShopToggleIn, session: AsyncSessionDep, _: AdminUser
+):
+    return ok(
+        await _domain(session, sell_ops.admin_set_shop_coupon_active, coupon_id, retailer_user_id, body.is_active)
+    )
 
 @router.post('/shops/{retailer_user_id}/collect')
 async def post_collect(retailer_user_id: int, body: CollectIn, session: AsyncSessionDep, admin: AdminUser):
@@ -288,8 +329,12 @@ async def read_notifications(session: AsyncSessionDep, admin: AdminUser):
     return ok(await _domain(session, misc_ops.mark_notifications_read, admin.id))
 
 @router.get('/banners')
-async def get_banners(session: AsyncSessionDep, _: AdminUser):
-    return ok(await _domain(session, misc_ops.list_banners))
+async def get_banners(
+    session: AsyncSessionDep,
+    _: AdminUser,
+    shop_user_id: Optional[int] = Query(None, ge=1),
+):
+    return ok(await _domain(session, misc_ops.list_banners, shop_user_id=shop_user_id))
 
 @router.post('/banners')
 async def post_banner(body: BannerIn, session: AsyncSessionDep, _: AdminUser):

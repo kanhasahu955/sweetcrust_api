@@ -20,10 +20,11 @@ def generate_order_number() -> str:
     return f"SC{stamp}{suffix}"
 
 
-def generate_invoice_number() -> str:
+def generate_invoice_number(prefix: str = "INV") -> str:
     stamp = utc_now().strftime("%Y%m")
     suffix = "".join(secrets.choice(string.digits) for _ in range(5))
-    return f"INV-{stamp}-{suffix}"
+    tag = (prefix or "INV").strip().upper()[:8] or "INV"
+    return f"{tag}-{stamp}-{suffix}"
 
 
 def generate_txn_id(prefix: str = "TXN") -> str:

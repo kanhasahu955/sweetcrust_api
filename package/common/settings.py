@@ -6,9 +6,10 @@ use that service's Settings subclass (e.g. AISettings).
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Callable, Optional, TypeVar
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from package.common.env import package_env_files
@@ -55,6 +56,7 @@ class Settings(BaseSettings):
 
     # --- http ---
     cors_origins: str = "*"
+    # Relative paths resolve to backend_v2/uploads so auth write + store-ops serve share one dir.
     upload_dir: str = "uploads"
 
     # --- realtime / cache ---
@@ -65,6 +67,23 @@ class Settings(BaseSettings):
     bakery_phone: str = "+919876543210"
     bakery_gstin: Optional[str] = None
     bakery_upi_id: Optional[str] = None
+
+    # --- SMTP (invoice / auth mail) ---
+    smtp_host: Optional[str] = None
+    smtp_port: int = 465
+    smtp_user: Optional[str] = None
+    smtp_pass: Optional[str] = None
+    mail_from_name: str = "SweetCrust Bakery"
+    mail_from_email: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _resolve_upload_dir(self):
+        p = Path(self.upload_dir)
+        if not p.is_absolute():
+            # package/common/settings.py → backend_v2
+            root = Path(__file__).resolve().parents[2]
+            object.__setattr__(self, "upload_dir", str((root / p).resolve()))
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -79,6 +98,10 @@ class Settings(BaseSettings):
     @property
     def redis_configured(self) -> bool:
         return bool(self.redis_url)
+
+    @property
+    def mail_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_user and self.smtp_pass and self.mail_from_email)
 
     def public_dict(self) -> dict:
         """Non-secret snapshot for /health or boot logs."""

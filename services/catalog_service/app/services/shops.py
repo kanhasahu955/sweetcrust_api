@@ -6,6 +6,7 @@ from sqlmodel import Session, col, func, select
 from app.models.catalog import Product
 from app.models.user import RetailerProfile
 from package.common.errors import NotFoundError
+from package.common.shop_hours import enforce_auto_close
 
 
 def _shop_dict(profile: RetailerProfile, product_count: int = 0) -> dict:
@@ -30,6 +31,16 @@ def _shop_dict(profile: RetailerProfile, product_count: int = 0) -> dict:
     }
 
 
+def _apply_hours(session: Session, profiles: list[RetailerProfile]) -> None:
+    dirty = False
+    for p in profiles:
+        if enforce_auto_close(p):
+            session.add(p)
+            dirty = True
+    if dirty:
+        session.commit()
+
+
 def list_shops(session: Session) -> list[dict]:
     profiles = list(
         session.exec(
@@ -41,6 +52,7 @@ def list_shops(session: Session) -> list[dict]:
     )
     if not profiles:
         return []
+    _apply_hours(session, profiles)
     counts: dict[int, int] = {}
     rows = session.exec(
         select(Product.supplier_user_id, func.count(Product.id))
@@ -67,6 +79,7 @@ def shop_detail(session: Session, shop_user_id: int) -> dict:
     ).first()
     if not profile:
         raise NotFoundError("Shop not found")
+    _apply_hours(session, [profile])
     products = list(
         session.exec(
             select(Product)

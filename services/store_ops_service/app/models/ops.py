@@ -181,6 +181,8 @@ class Banner(SQLModel, table=True):
     link_value: Optional[str] = Field(default=None, max_length=200)
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
+    # null = platform banner; set for retailer shop banners
+    shop_user_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
     created_at: datetime = Field(default_factory=utc_now)
 
 

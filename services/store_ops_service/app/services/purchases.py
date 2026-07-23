@@ -193,6 +193,26 @@ def create_purchase(
 
     session.commit()
     session.refresh(purchase)
+    if mark_paid and purchase.status == "paid":
+        try:
+            from app.services import invoices as invoice_ops
+
+            invoice_ops.issue_supplier_payment(
+                session,
+                purchase_id=int(purchase.id),
+                bill_no=f"SP-{purchase.id:05d}",
+                supplier_user_id=purchase.supplier_user_id,
+                shop_name=profile.shop_name or "",
+                product_name=purchase.product_name,
+                qty=float(purchase.qty),
+                unit_cost=float(purchase.unit_cost),
+                pay_amount=float(purchase.total),
+                pay_method=pay_method or "cash",
+                transaction_id=None,
+                phone=profile.contact_phone or user.phone or "",
+            )
+        except Exception:
+            logger.exception("supplier payment invoice failed for PO %s", purchase.id)
     out = purchase_dict(session, purchase)
     if purchase.status == "pending":
         emit_user_event(
@@ -303,12 +323,31 @@ def pay_purchase(
     purchase.updated_at = utc_now()
     session.add(purchase)
 
-    _, profile = _shop(session, purchase.supplier_user_id)
+    supplier, profile = _shop(session, purchase.supplier_user_id)
     profile.payable_balance = max(0.0, round(float(profile.payable_balance or 0) - pay, 2))
     session.add(profile)
     session.commit()
     session.refresh(purchase)
     _ = created_by
+    try:
+        from app.services import invoices as invoice_ops
+
+        invoice_ops.issue_supplier_payment(
+            session,
+            purchase_id=int(purchase.id),
+            bill_no=f"SP-{purchase.id:05d}",
+            supplier_user_id=purchase.supplier_user_id,
+            shop_name=profile.shop_name or "",
+            product_name=purchase.product_name,
+            qty=float(purchase.qty),
+            unit_cost=float(purchase.unit_cost),
+            pay_amount=pay,
+            pay_method=method,
+            transaction_id=razorpay_payment_id,
+            phone=profile.contact_phone or supplier.phone or "",
+        )
+    except Exception:
+        logger.exception("supplier payment invoice failed for PO %s", purchase.id)
     out = purchase_dict(session, purchase)
     emit_admin_event(
         "po_paid",

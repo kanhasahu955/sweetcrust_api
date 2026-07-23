@@ -94,6 +94,8 @@ class Coupon(SQLModel, table=True):
     usage_limit: Optional[int] = Field(default=None)
     used_count: int = Field(default=0)
     is_active: bool = Field(default=True)
+    # null = platform coupon; set for retailer shop offers
+    shop_user_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -139,7 +141,14 @@ class Invoice(SQLModel, table=True):
     __tablename__ = "invoices"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    order_id: int = Field(foreign_key="orders.id", unique=True, index=True)
+    # Nullable so subscription / PO settlements can invoice without a commerce order.
+    order_id: Optional[int] = Field(default=None, foreign_key="orders.id", unique=True, index=True)
+    # subscription_pack | b2b_wholesale | customer_order | supplier_settlement
+    kind: str = Field(default="customer_order", max_length=40, index=True)
+    ref_type: Optional[str] = Field(default=None, max_length=40, index=True)
+    ref_id: Optional[str] = Field(default=None, max_length=80, index=True)
+    buyer_user_id: Optional[int] = Field(default=None, index=True)
+    seller_user_id: Optional[int] = Field(default=None, index=True)
     invoice_number: str = Field(unique=True, index=True, max_length=40)
     bakery_name: str = Field(max_length=200)
     gstin: str = Field(max_length=20)

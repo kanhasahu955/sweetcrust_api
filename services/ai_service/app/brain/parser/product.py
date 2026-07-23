@@ -46,3 +46,65 @@ def parse_product_enrich(raw: str) -> dict[str, Any]:
             except Exception:
                 pass
     return {}
+
+
+class ProductCopyOutput(BaseModel):
+    short_descriptions: list[str] = Field(default_factory=list)
+    details: list[str] = Field(default_factory=list)
+
+
+def _clean_str_list(items: Any, limit: int) -> list[str]:
+    out: list[str] = []
+    if not isinstance(items, list):
+        return out
+    for item in items:
+        s = str(item or "").strip()
+        if s and s not in out:
+            out.append(s)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def parse_product_copy(raw: str) -> dict[str, list[str]]:
+    text = (raw or "").strip()
+    data: Any = None
+    for candidate in (text,):
+        try:
+            data = json.loads(candidate)
+            break
+        except Exception:
+            pass
+    if data is None:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+            except Exception:
+                data = None
+    if not isinstance(data, dict):
+        return {"short_descriptions": [], "details": []}
+    return {
+        "short_descriptions": _clean_str_list(data.get("short_descriptions"), 6),
+        "details": _clean_str_list(data.get("details"), 6),
+    }
+
+
+def parse_banner_copy(raw: str) -> dict[str, list[str]]:
+    text = (raw or "").strip()
+    data: Any = None
+    try:
+        data = json.loads(text)
+    except Exception:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+            except Exception:
+                data = None
+    if not isinstance(data, dict):
+        return {"titles": [], "subtitles": []}
+    return {
+        "titles": _clean_str_list(data.get("titles"), 6),
+        "subtitles": _clean_str_list(data.get("subtitles"), 6),
+    }

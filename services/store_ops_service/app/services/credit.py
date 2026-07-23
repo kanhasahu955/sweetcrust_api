@@ -140,6 +140,17 @@ def credit_payment(
     session.add(entry)
     session.commit()
     session.refresh(entry)
+    # Each settled B2B order gets a product invoice (idempotent).
+    if allocated:
+        try:
+            from app.services import invoices as invoice_ops
+
+            for oid in allocated:
+                order = session.get(Order, oid)
+                if order:
+                    invoice_ops.issue_from_order(session, order)
+        except Exception:
+            logger.exception("B2B invoice on collection failed retailer=%s", retailer_user_id)
     emit_admin_event(
         "shop_collection",
         {

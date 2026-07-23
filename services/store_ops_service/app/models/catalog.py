@@ -20,6 +20,9 @@ class Category(SQLModel, table=True):
     image_url: Optional[str] = Field(default=None, max_length=500)
     display_order: int = Field(default=0)
     is_active: bool = Field(default=True)
+    # null parent = top-level. Platform cats have owner_user_id=null; shop cats set owner_user_id.
+    parent_id: Optional[int] = Field(default=None, foreign_key="categories.id", index=True)
+    owner_user_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

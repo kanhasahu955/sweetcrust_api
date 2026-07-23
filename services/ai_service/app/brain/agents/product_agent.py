@@ -240,6 +240,238 @@ class ProductAgent:
             logger.exception("LLM product enrich skipped")
         return result
 
+    def suggest_copy(
+        self,
+        name: str,
+        category: str | None = None,
+        *,
+        variation: int = 1,
+        exclude: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """AI listing copy from product name + category (no images required)."""
+        from package.common.errors import BadRequestError
+
+        n = (name or "").strip()
+        c = (category or "").strip()
+        if not n:
+            raise BadRequestError("Product name is required")
+        if len(n) < 2:
+            raise BadRequestError("Product name must be at least 2 characters")
+        if len(n) > 160:
+            raise BadRequestError("Product name is too long")
+        if not c:
+            raise BadRequestError("Category is required")
+        if len(c) > 160:
+            raise BadRequestError("Category is too long")
+        var = max(1, min(int(variation or 1), 20))
+        skip = [str(x).strip() for x in (exclude or []) if str(x).strip()][:40]
+
+        fallback = self._rules_copy(n, c, variation=var)
+        settings = get_settings()
+        if not settings.llm_configured or not settings.llm_api_key:
+            return {**fallback, "provider": "rules", "stub": True, "variation": var}
+
+        try:
+            from app.brain.llm import get_chat_model
+            from app.brain.parser.product import parse_product_copy
+            from app.brain.prompts.product import product_copy_prompt
+
+            messages = product_copy_prompt.format_messages(
+                name=n,
+                category=c,
+                variation=str(var),
+                exclude=json.dumps(skip[:12], ensure_ascii=False) if skip else "[]",
+            )
+            model = get_chat_model()
+            if settings.llm_provider.lower() in ("openai", "groq"):
+                try:
+                    model = model.bind(response_format={"type": "json_object"})
+                except Exception:
+                    pass
+            raw = model.invoke(messages).content
+            data = parse_product_copy(raw if isinstance(raw, str) else str(raw))
+            shorts = [s for s in (data.get("short_descriptions") or []) if s not in skip]
+            details = [d for d in (data.get("details") or []) if d not in skip]
+            if len(shorts) < 2 or len(details) < 2:
+                shorts = shorts or fallback["short_descriptions"]
+                details = details or fallback["details"]
+                for s in fallback["short_descriptions"]:
+                    if s not in shorts and s not in skip and len(shorts) < 6:
+                        shorts.append(s)
+                for d in fallback["details"]:
+                    if d not in details and d not in skip and len(details) < 6:
+                        details.append(d)
+            return {
+                "name": n,
+                "category": c,
+                "short_descriptions": shorts[:6],
+                "details": details[:6],
+                "variation": var,
+                "provider": f"langchain:{settings.llm_provider}",
+                "model": settings.llm_model,
+                "stub": False,
+            }
+        except Exception:
+            logger.exception("LLM product copy failed — using rules fallback")
+            return {**fallback, "provider": "rules", "stub": True, "variation": var}
+
+    @staticmethod
+    def _rules_copy(name: str, category: str, variation: int = 1) -> dict[str, Any]:
+        n, c = name, category
+        v = max(1, variation)
+        # ponytail: heuristic ingredients by keyword — upgrade path is always LLM when configured
+        low = f"{n} {c}".lower()
+        if "chakli" in low or "murukku" in low:
+            ingredients = ["Besan / rice flour", "Butter or oil", "Cumin / ajwain", "Salt", "Sesame seeds"]
+            method = ["Knead a soft spiced dough", "Press through chakli mould", "Deep-fry till golden and crisp"]
+        elif "cake" in low:
+            ingredients = ["Flour", "Sugar", "Butter / oil", "Eggs or eggless mix", "Cocoa or flavour"]
+            method = ["Whip batter till smooth", "Bake in preheated oven", "Cool and finish with frosting"]
+        elif "bread" in low:
+            ingredients = ["Flour", "Yeast", "Water", "Salt", "Oil / butter"]
+            method = ["Knead and proof the dough", "Shape loaves", "Bake till crust is golden"]
+        else:
+            ingredients = ["Quality base flour / mix", "Oil or ghee", "Seasoning / spices", "Salt"]
+            method = ["Prepare fresh in small batches", "Cook or bake to order style", "Cool and pack for shelf"]
+
+        def detail(tag: str, about: list[str]) -> str:
+            lines = [
+                "About:",
+                *[f"• {x}" for x in about],
+                "Ingredients:",
+                *[f"• {x}" for x in ingredients],
+                "How it's made:",
+                *[f"• {x}" for x in method],
+                "Storage:",
+                "• Keep in an airtight box in a cool, dry place",
+                "• Best within a few days of packing",
+            ]
+            return "\n".join(lines) + (f"\n• Batch tip: variation {tag}" if v > 1 else "")
+
+        shorts = [
+            f"Fresh {n} from our {c} range.",
+            f"Homemade {n} — crispy, tasty, made daily.",
+            f"Premium {n} perfect for snacking and gifting.",
+            f"Classic {c} favourite: {n}.",
+            f"{n} with authentic flavour, packed fresh.",
+            f"Crunchy {n} — tea-time ready from {c}.",
+        ]
+        # rotate for "more"
+        rot = (v - 1) % len(shorts)
+        shorts = shorts[rot:] + shorts[:rot]
+        details = [
+            detail("A", [f"{n} from the {c} selection", "Crisp bite with homemade taste"]),
+            detail("B", [f"Everyday snack: {n}", "Light seasoning, ready to serve"]),
+            detail("C", [f"Festive tray favourite — {n}", "Consistent batch quality"]),
+            detail("D", [f"Tea-time {n}", "Packed fresh for better crunch"]),
+            detail("E", [f"Family pack style {n}", "Made with care in small batches"]),
+        ]
+        drot = (v - 1) % len(details)
+        details = details[drot:] + details[:drot]
+        return {
+            "name": n,
+            "category": c,
+            "short_descriptions": shorts[:5],
+            "details": details[:5],
+            "variation": v,
+        }
+
+
+    def suggest_banner(
+        self,
+        shop_name: str,
+        hint: str | None = None,
+        *,
+        variation: int = 1,
+        exclude: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Promo banner title + subtitle options for Sell → Banners."""
+        shop = (shop_name or "").strip() or "SweetCrust"
+        h = (hint or "").strip() or "fresh bakery specials"
+        var = max(1, min(int(variation or 1), 20))
+        skip = [str(x).strip() for x in (exclude or []) if str(x).strip()][:40]
+        fallback = self._rules_banner(shop, h, variation=var)
+
+        settings = get_settings()
+        if not settings.llm_configured or not settings.llm_api_key:
+            return {**fallback, "provider": "rules", "stub": True, "variation": var}
+
+        try:
+            from app.brain.llm import get_chat_model
+            from app.brain.parser.product import parse_banner_copy
+            from app.brain.prompts.product import banner_copy_prompt
+
+            messages = banner_copy_prompt.format_messages(
+                shop_name=shop,
+                hint=h,
+                variation=str(var),
+                exclude=json.dumps(skip[:12], ensure_ascii=False) if skip else "[]",
+            )
+            model = get_chat_model()
+            if settings.llm_provider.lower() in ("openai", "groq"):
+                try:
+                    model = model.bind(response_format={"type": "json_object"})
+                except Exception:
+                    pass
+            raw = model.invoke(messages).content
+            data = parse_banner_copy(raw if isinstance(raw, str) else str(raw))
+            titles = [t for t in (data.get("titles") or []) if t not in skip]
+            subs = [s for s in (data.get("subtitles") or []) if s not in skip]
+            if len(titles) < 2 or len(subs) < 2:
+                titles = titles or fallback["titles"]
+                subs = subs or fallback["subtitles"]
+                for t in fallback["titles"]:
+                    if t not in titles and t not in skip and len(titles) < 6:
+                        titles.append(t)
+                for s in fallback["subtitles"]:
+                    if s not in subs and s not in skip and len(subs) < 6:
+                        subs.append(s)
+            return {
+                "shop_name": shop,
+                "hint": h,
+                "titles": titles[:6],
+                "subtitles": subs[:6],
+                "variation": var,
+                "provider": f"langchain:{settings.llm_provider}",
+                "model": settings.llm_model,
+                "stub": False,
+            }
+        except Exception:
+            logger.exception("LLM banner copy failed — using rules fallback")
+            return {**fallback, "provider": "rules", "stub": True, "variation": var}
+
+    @staticmethod
+    def _rules_banner(shop: str, hint: str, variation: int = 1) -> dict[str, Any]:
+        v = max(1, variation)
+        titles = [
+            f"Fresh at {shop}",
+            "Today's warm specials",
+            f"{hint[:28]}" if len(hint) >= 4 else "Bakery favourites",
+            "Crisp · ready now",
+            "Weekend treat tray",
+            "Taste of home, packed fresh",
+        ]
+        subs = [
+            "Order for pickup or delivery",
+            "Small-batch bakery favourites",
+            f"From {shop} — made with care",
+            "Limited trays · order early",
+            "Perfect with chai this evening",
+            "Tap to explore today's menu",
+        ]
+        rot = (v - 1) % len(titles)
+        titles = titles[rot:] + titles[:rot]
+        subs = subs[rot:] + subs[:rot]
+        return {
+            "shop_name": shop,
+            "hint": hint,
+            "titles": titles[:5],
+            "subtitles": subs[:5],
+            "variation": v,
+        }
+
 
 _agent = ProductAgent()
 analyze_product_images = _agent.analyze
+suggest_product_copy = _agent.suggest_copy
+suggest_banner_copy = _agent.suggest_banner

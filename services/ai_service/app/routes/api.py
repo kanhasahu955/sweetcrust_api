@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Query, Request, Response
 from package.common.errors import ForbiddenError, NotFoundError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import func, select
 from app.brain.agents.chatbot_agent import respond as ai_respond
 from app.brain.agents.product_agent import analyze_product_images
@@ -223,6 +223,42 @@ class ProductAiSuggestIn(BaseModel):
     image_urls: list[str] = Field(default_factory=list)
     notes: Optional[str] = None
 
+class ProductAiCopyIn(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    category: str = Field(min_length=1, max_length=160)
+    variation: int = Field(default=1, ge=1, le=20)
+    exclude: list[str] = Field(default_factory=list, max_length=40)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("Product name is required")
+        if len(s) < 2:
+            raise ValueError("Product name must be at least 2 characters")
+        return s
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, v: str) -> str:
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("Category is required")
+        return s
+
+    @field_validator("exclude")
+    @classmethod
+    def _exclude(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in v or []:
+            s = str(item or "").strip()
+            if s and s not in out:
+                out.append(s)
+            if len(out) >= 40:
+                break
+        return out
+
 @retailer_router.post('/ai/chat')
 async def retailer_ai_chat(body: AIChatIn, session: AsyncSessionDep, user: RetailerUser):
     return await _run_ai_chat(session=session, user=user, body=body, audience='retailer')
@@ -237,6 +273,54 @@ def product_ai_suggest(body: ProductAiSuggestIn, user: RetailerUser):
     result.setdefault('vision', False)
     result.setdefault('stub', result.get('provider') == 'rules')
     return result
+
+@retailer_router.post('/products/ai-copy')
+async def product_ai_copy(body: ProductAiCopyIn, user: RetailerUser):
+    # LLM can take a few seconds — keep the event loop free
+    return await asyncio.to_thread(
+        retailer_service.ai_suggest_product_copy,
+        body.name,
+        body.category,
+        variation=body.variation,
+        exclude=body.exclude,
+    )
+
+@retailer_router.post('/products/ai-image')
+async def product_ai_image(body: ProductAiCopyIn, user: RetailerUser):
+    from app.services.category_image import generate_product_image
+
+    # Image models are slow — keep the event loop free
+    return await asyncio.to_thread(generate_product_image, body.name, body.category)
+
+
+class BannerAiCopyIn(BaseModel):
+    shop_name: str = Field(default="", max_length=160)
+    hint: str = Field(default="", max_length=160)
+    variation: int = Field(default=1, ge=1, le=20)
+    exclude: list[str] = Field(default_factory=list, max_length=40)
+
+    @field_validator("exclude")
+    @classmethod
+    def _exclude(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in v or []:
+            s = str(item or "").strip()
+            if s and s not in out:
+                out.append(s)
+            if len(out) >= 40:
+                break
+        return out
+
+
+@retailer_router.post('/banners/ai-copy')
+async def banner_ai_copy(body: BannerAiCopyIn, user: RetailerUser):
+    return await asyncio.to_thread(
+        retailer_service.ai_suggest_banner_copy,
+        body.shop_name,
+        body.hint,
+        variation=body.variation,
+        exclude=body.exclude,
+    )
 
 @root_router.post('/api/v1/voice/twilio/voice')
 async def twilio_voice(request: Request, call_id: int=Query(...)):

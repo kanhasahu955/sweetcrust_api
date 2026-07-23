@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from sqlmodel import Session, col, select
 
-from app.producers.events import emit_order_status
+from app.producers.events import emit_order_status, emit_user_event
 from app.models.catalog import Product
 from app.models.commerce import (
     Cart,
@@ -345,10 +345,40 @@ def checkout(session: Session, user_id: int, data) -> Order:
     if admin:
         notify(session, admin.id, "order", "New order", f"Order {order.order_number} received", {"order_id": order.id})
 
+    # Dark-store alarm: notify owning shop (Blinkit-style inbox)
+    shop_id = int(order.shop_user_id) if order.shop_user_id else None
+    if shop_id:
+        notify(
+            session,
+            shop_id,
+            "order",
+            "New customer order",
+            f"Order {order.order_number} · ₹{float(order.final_amount or 0):.0f}",
+            {"order_id": order.id, "order_number": order.order_number, "amount": float(order.final_amount or 0)},
+        )
+
     session.commit()
     session.refresh(order)
-    emit_order_status(order.id, {"status": order.status.value, "user_id": order.user_id})
-    logger.info("checkout order=%s user=%s", order.order_number, user_id)
+    emit_order_status(
+        order.id,
+        {
+            "status": order.status.value,
+            "user_id": order.user_id,
+            "shop_user_id": shop_id,
+        },
+    )
+    if shop_id:
+        emit_user_event(
+            shop_id,
+            "sales_order",
+            {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "amount": float(order.final_amount or 0),
+                "status": order.status.value,
+            },
+        )
+    logger.info("checkout order=%s user=%s shop=%s", order.order_number, user_id, shop_id)
     return order
 
 

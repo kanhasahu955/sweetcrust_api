@@ -3,11 +3,14 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter
+from pydantic import Field, field_validator
 from app.deps import RetailerUser, AsyncSessionDep
+from app.services import analytics as analytics_ops
 from app.services import billing as billing_ops
 from app.services import retailer_bff as r_ops
 from app.services import sell as sell_ops
 from app.services import supplier as supplier_ops
+from app.services import units as unit_ops
 from app.schemas.admin import BulkOrderIn, CallbackIn, MessageIn, ProductRequestIn, RetailerProfilePatchIn
 from package.common.schemas import APIModel, ok
 from package.logger import get_logger
@@ -29,17 +32,37 @@ class SupplierProductPatchIn(APIModel):
 
 
 class ShopProductIn(APIModel):
-    category_id: int
-    name: str
-    selling_price: float = 0
-    customer_price: Optional[float] = None
-    shop_price: Optional[float] = None
-    purchase_cost: Optional[float] = None
-    stock_qty: int = 0
-    short_description: Optional[str] = None
-    description: Optional[str] = None
-    cover_image_url: Optional[str] = None
+    category_id: int = Field(gt=0)
+    name: str = Field(min_length=2, max_length=160)
+    selling_price: float = Field(gt=0)
+    customer_price: Optional[float] = Field(default=None, ge=0)
+    shop_price: Optional[float] = Field(default=None, ge=0)
+    purchase_cost: Optional[float] = Field(default=None, ge=0)
+    stock_qty: int = Field(default=0, ge=0)
+    short_description: Optional[str] = Field(default=None, max_length=300)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    weight: Optional[str] = Field(default=None, max_length=80)
+    unit_label: Optional[str] = Field(default=None, max_length=40)
+    cover_image_url: Optional[str] = Field(default=None, max_length=500)
     is_active: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("Product name is required")
+        if len(s) < 2:
+            raise ValueError("Product name must be at least 2 characters")
+        return s
+
+    @field_validator("short_description", "description", "weight", "unit_label", "cover_image_url")
+    @classmethod
+    def _optional_strip(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        return s or None
 
 
 class ShopProductPatchIn(APIModel):
@@ -52,9 +75,63 @@ class ShopProductPatchIn(APIModel):
     stock_qty: Optional[int] = None
     short_description: Optional[str] = None
     description: Optional[str] = None
+    weight: Optional[str] = None
+    unit_label: Optional[str] = None
     cover_image_url: Optional[str] = None
     is_active: Optional[bool] = None
     is_draft: Optional[bool] = None
+
+
+class ShopCategoryIn(APIModel):
+    name: str
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+class ShopBannerIn(APIModel):
+    title: str
+    image_url: Optional[str] = None
+    theme_color: Optional[str] = None
+    subtitle: Optional[str] = None
+    link_type: Optional[str] = None
+    link_value: Optional[str] = None
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class ShopBannerPatchIn(APIModel):
+    title: Optional[str] = None
+    image_url: Optional[str] = None
+    subtitle: Optional[str] = None
+    link_type: Optional[str] = None
+    link_value: Optional[str] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class ShopCouponIn(APIModel):
+    code: str
+    title: str
+    description: Optional[str] = None
+    coupon_type: str = "percentage"
+    value: float = 0
+    min_order_amount: float = 0
+    max_discount: Optional[float] = None
+    usage_limit: Optional[int] = None
+    is_active: bool = True
+    theme_color: Optional[str] = None
+    link_action: Optional[str] = None
+
+
+class ShopCouponPatchIn(APIModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    coupon_type: Optional[str] = None
+    value: Optional[float] = None
+    min_order_amount: Optional[float] = None
+    max_discount: Optional[float] = None
+    usage_limit: Optional[int] = None
+    is_active: Optional[bool] = None
 
 
 class SalesStatusIn(APIModel):
@@ -146,9 +223,88 @@ async def billing_supplier_bills(session: AsyncSessionDep, user: RetailerUser):
     return ok(await _domain(session, billing_ops.supplier_bills, user))
 
 
+class BillingPayIn(APIModel):
+    amount: float = Field(gt=0)
+    method: str = "upi"
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+@router.post('/billing/pay')
+async def billing_pay(body: BillingPayIn, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, billing_ops.pay_udhaar, user, body.model_dump()))
+
+
+@router.get('/billing/payments')
+async def billing_payments(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, billing_ops.payment_history, user))
+
+
+@router.get('/billing/dashboard')
+async def billing_dashboard(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, billing_ops.dashboard, user))
+
+
+@router.get('/billing/pending-sales')
+async def billing_pending_sales(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, billing_ops.pending_sales_count, user))
+
+
+@router.get('/notifications')
+async def retailer_notifications(session: AsyncSessionDep, user: RetailerUser):
+    from app.services import misc as misc_ops
+
+    return ok(await _domain(session, misc_ops.list_notifications, user.id))
+
+
+@router.post('/notifications/read')
+async def retailer_notifications_read(session: AsyncSessionDep, user: RetailerUser):
+    from app.services import misc as misc_ops
+
+    return ok(await _domain(session, misc_ops.mark_notifications_read, user.id))
+
+
+class SellPlanPayIn(APIModel):
+    cadence: str  # monthly | yearly
+
+
+@router.get('/sell/subscription')
+async def sell_subscription(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.subscription_status, user))
+
+
+@router.get('/sell/subscription/plans')
+async def sell_subscription_plans(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.list_sell_plans, user))
+
+
+@router.post('/sell/subscription/request')
+async def sell_subscription_request(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.request_sell_subscription, user))
+
+
+@router.post('/sell/subscription/razorpay/create')
+async def sell_subscription_pay_create(body: SellPlanPayIn, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.create_sell_subscription_payment, user, body.cadence))
+
+
+@router.post('/sell/subscription/razorpay/confirm')
+async def sell_subscription_pay_confirm(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.confirm_sell_subscription_payment, user))
+
+
+@router.get('/units')
+async def list_units(_: RetailerUser):
+    return ok(unit_ops.list_units())
+
+
 @router.get('/catalog/categories')
 async def sell_categories(session: AsyncSessionDep, user: RetailerUser):
     return ok(await _domain(session, sell_ops.list_categories, user))
+
+
+@router.post('/catalog/categories')
+async def sell_create_category(body: ShopCategoryIn, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.create_category, user, body.model_dump()))
 
 
 @router.get('/catalog/products')
@@ -171,6 +327,53 @@ async def sell_patch_product(product_id: int, body: ShopProductPatchIn, session:
             product_id,
             body.model_dump(exclude_unset=True),
         )
+    )
+
+
+@router.delete('/catalog/products/{product_id}')
+async def sell_delete_product(product_id: int, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.delete_my_product, user, product_id))
+
+
+@router.get('/sell/banners')
+async def sell_banners(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.list_banners, user))
+
+
+@router.post('/sell/banners')
+async def sell_create_banner(body: ShopBannerIn, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.create_banner, user, body.model_dump()))
+
+
+@router.patch('/sell/banners/{banner_id}')
+async def sell_patch_banner(banner_id: int, body: ShopBannerPatchIn, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.patch_banner, user, banner_id, body.model_dump(exclude_unset=True)))
+
+
+@router.get('/sell/coupons')
+async def sell_coupons(session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.list_coupons, user))
+
+
+@router.post('/sell/coupons')
+async def sell_create_coupon(body: ShopCouponIn, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.create_coupon, user, body.model_dump()))
+
+
+@router.patch('/sell/coupons/{coupon_id}')
+async def sell_patch_coupon(coupon_id: int, body: ShopCouponPatchIn, session: AsyncSessionDep, user: RetailerUser):
+    return ok(await _domain(session, sell_ops.patch_coupon, user, coupon_id, body.model_dump(exclude_unset=True)))
+
+
+@router.get('/analytics')
+async def retailer_analytics(
+    session: AsyncSessionDep,
+    user: RetailerUser,
+    period: str = "daily",
+    anchor: Optional[str] = None,
+):
+    return ok(
+        await _domain(session, analytics_ops.shop_analytics, user, period=period, anchor=anchor)
     )
 
 

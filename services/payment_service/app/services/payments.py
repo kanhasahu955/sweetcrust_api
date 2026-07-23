@@ -7,13 +7,14 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.models.commerce import Invoice, Order, OrderItem, OrderStatusHistory, Payment
-from app.models.enums import NotificationType, OrderStatus, PaymentMethod, PaymentStatus
+from app.models.enums import NotificationType, OrderStatus, PaymentMethod, PaymentStatus, UserRole
 from app.models.ops import BakerySettings, Notification
 from app.models.user import User
 from app.producers.events import emit_admin_event, emit_order_status
 from app.services import razorpay as razorpay_ops
 from app.config import get_settings
 from package.common.errors import BadRequestError, NotFoundError
+from package.common.mail import email_invoice
 from package.common.utils import generate_invoice_number, generate_txn_id, utc_now
 from package.logger import get_logger
 
@@ -99,19 +100,32 @@ def generate_invoice(session: Session, order: Order) -> Invoice:
     items = list(session.exec(select(OrderItem).where(OrderItem.order_id == order.id)).all())
     payment = session.exec(select(Payment).where(Payment.order_id == order.id).order_by(Payment.id.desc())).first()
     addr = order.address_snapshot or {}
+    ot = order.order_type.value if hasattr(order.order_type, "value") else str(getattr(order, "order_type", "") or "")
+    is_b2b = ot in ("b2b_shop_order", "B2B_SHOP_ORDER")
+    kind = "b2b_wholesale" if is_b2b else "customer_order"
+    template = "product_payment"
     invoice = Invoice(
         order_id=order.id,
-        invoice_number=generate_invoice_number(),
+        kind=kind,
+        ref_type="order",
+        ref_id=str(order.id),
+        buyer_user_id=order.user_id,
+        seller_user_id=None if is_b2b else order.shop_user_id,
+        invoice_number=generate_invoice_number("B2B" if is_b2b else "INV"),
         bakery_name=settings.bakery_name,
         gstin=settings.gstin,
-        customer_name=addr.get("full_name", "Customer"),
+        customer_name=addr.get("full_name") or addr.get("shop_name") or "Customer",
         customer_phone=order.customer_phone or addr.get("phone", ""),
         customer_address=", ".join(filter(None, [addr.get("line1"), addr.get("city"), addr.get("pincode")])),
         line_items={
+            "template": template,
+            "kind": kind,
+            "title": f"{'Wholesale' if is_b2b else 'Sale'} · {order.order_number}",
             "items": [
                 {"name": i.product_name, "qty": i.quantity, "unit_price": i.unit_price, "total": i.total_price}
                 for i in items
-            ]
+            ],
+            "meta": {"order_number": order.order_number, "order_type": ot},
         },
         subtotal=order.subtotal,
         discount=order.discount,
@@ -124,6 +138,18 @@ def generate_invoice(session: Session, order: Order) -> Invoice:
     session.add(invoice)
     session.commit()
     session.refresh(invoice)
+    try:
+        sent = email_invoice(
+            session,
+            invoice,
+            user_model=User,
+            bakery_settings_model=BakerySettings,
+            admin_role=UserRole.ADMIN,
+        )
+        if sent:
+            logger.info("invoice %s emailed to %s", invoice.invoice_number, ", ".join(sent))
+    except Exception:
+        logger.exception("invoice email failed for %s", invoice.invoice_number)
     return invoice
 
 

@@ -6,6 +6,7 @@ from app.models.catalog import Category, Product, StockMovement
 from app.models.enums import StockStatus, UserRole
 from app.models.user import RetailerProfile, User
 from app.schemas.admin import CategoryIn, ProductIn
+from app.services.units import normalize_unit
 from package.common.errors import BadRequestError, NotFoundError
 from package.common.utils import slugify, stock_status_for, utc_now
 from package.logger import get_logger
@@ -47,10 +48,13 @@ def list_products(
     page: int = 1,
     page_size: int = 50,
     category_id: int | None = None,
+    supplier_user_id: int | None = None,
 ):
     stmt = select(Product).order_by(Product.updated_at.desc())
     if category_id:
         stmt = stmt.where(Product.category_id == category_id)
+    if supplier_user_id:
+        stmt = stmt.where(Product.supplier_user_id == supplier_user_id)
     rows = list(session.exec(stmt).all())
     if q:
         ql = q.lower()
@@ -84,6 +88,7 @@ def create_product(session: Session, body: ProductIn, admin_id: int | None = Non
         allergens=body.allergens,
         flavor=body.flavor,
         weight=body.weight,
+        unit_label=normalize_unit(body.unit_label),
         selling_price=body.selling_price,
         customer_price=body.customer_price,
         shop_price=body.shop_price,
@@ -122,6 +127,8 @@ def update_product(session: Session, product_id: int, data: dict) -> Product:
         )
         data["brand_name"] = brand_name
         data["supplier_user_id"] = supplier_user_id
+    if "unit_label" in data:
+        data["unit_label"] = normalize_unit(data.get("unit_label"))
     for k, v in data.items():
         if hasattr(p, k):
             setattr(p, k, v)
@@ -155,6 +162,8 @@ def duplicate_product(session: Session, product_id: int, admin_id: int | None = 
         supplier_user_id=p.supplier_user_id,
         short_description=p.short_description,
         description=p.description,
+        weight=p.weight,
+        unit_label=p.unit_label,
         selling_price=p.selling_price,
         customer_price=p.customer_price,
         shop_price=p.shop_price,
@@ -190,7 +199,34 @@ def list_categories(session: Session, *, active_only: bool = False):
     rows = list(session.exec(stmt).all())
     if active_only:
         rows = [c for c in rows if c.is_active]
-    return rows
+
+    owner_ids = {int(c.owner_user_id) for c in rows if c.owner_user_id}
+    shops: dict[int, str] = {}
+    if owner_ids:
+        for rp in session.exec(
+            select(RetailerProfile).where(RetailerProfile.user_id.in_(owner_ids))  # type: ignore[attr-defined]
+        ).all():
+            shops[int(rp.user_id)] = rp.shop_name
+
+    out: list[dict] = []
+    for c in rows:
+        item = {
+            "id": c.id,
+            "name": c.name,
+            "slug": c.slug,
+            "description": c.description,
+            "image_url": c.image_url,
+            "display_order": c.display_order,
+            "is_active": c.is_active,
+            "parent_id": c.parent_id,
+            "owner_user_id": c.owner_user_id,
+            "created_at": c.created_at,
+            "updated_at": c.updated_at,
+            "source": "shop" if c.owner_user_id else "platform",
+            "owner_shop_name": shops.get(int(c.owner_user_id)) if c.owner_user_id else None,
+        }
+        out.append(item)
+    return out
 
 
 def upsert_category(session: Session, data: dict) -> Category:
@@ -228,6 +264,7 @@ def publish_ai_product(session: Session, body: dict, admin_id: int) -> Product:
         allergens=s.get("allergens"),
         flavor=s.get("flavor"),
         weight=s.get("weight"),
+        unit_label=s.get("unit_label") or "pcs",
         selling_price=float(s.get("selling_price") or s.get("recommended_selling_price") or 299),
         original_price=s.get("original_price") or s.get("discount_price"),
         gst_rate=float(s.get("gst_rate") or 5),

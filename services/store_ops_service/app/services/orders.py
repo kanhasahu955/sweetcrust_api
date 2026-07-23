@@ -9,7 +9,7 @@ from app.models.ops import BakerySettings
 from app.services import integrations as integ
 from app.config import get_settings
 from package.common.errors import BadRequestError, NotFoundError
-from package.common.utils import generate_invoice_number, utc_now
+from package.common.utils import utc_now
 from package.logger import get_logger
 
 logger = get_logger(__name__)
@@ -86,40 +86,9 @@ def update_order_status(
 
 
 def generate_invoice(session: Session, order: Order) -> Invoice:
-    existing = session.exec(select(Invoice).where(Invoice.order_id == order.id)).first()
-    if existing:
-        return existing
-    settings = session.exec(select(BakerySettings)).first() or BakerySettings()
-    items = list(session.exec(select(OrderItem).where(OrderItem.order_id == order.id)).all())
-    payment = session.exec(select(Payment).where(Payment.order_id == order.id).order_by(Payment.id.desc())).first()
-    addr = order.address_snapshot or {}
-    invoice = Invoice(
-        order_id=order.id,
-        invoice_number=generate_invoice_number(),
-        bakery_name=settings.bakery_name,
-        gstin=settings.gstin,
-        customer_name=addr.get("full_name") or addr.get("shop_name") or "Customer",
-        customer_phone=order.customer_phone or addr.get("phone") or "",
-        customer_address=", ".join(
-            filter(None, [addr.get("line1") or addr.get("address_line"), addr.get("city"), addr.get("pincode")])
-        ),
-        line_items={
-            "items": [
-                {"name": i.product_name, "qty": i.quantity, "unit_price": i.unit_price, "total": i.total_price}
-                for i in items
-            ]
-        },
-        subtotal=order.subtotal,
-        discount=order.discount,
-        gst_amount=order.gst_amount,
-        delivery_fee=order.delivery_fee,
-        grand_total=order.final_amount,
-        payment_method=order.payment_method.value if order.payment_method else None,
-        transaction_id=payment.transaction_id if payment else None,
-    )
-    session.add(invoice)
-    session.commit()
-    session.refresh(invoice)
+    from app.services import invoices as invoice_ops
+
+    invoice = invoice_ops.issue_from_order(session, order)
     logger.info("invoice %s for order %s", invoice.invoice_number, order.id)
     return invoice
 

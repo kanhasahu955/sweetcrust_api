@@ -8,6 +8,7 @@ from app.services.phone import normalize_phone
 from app.schemas.admin import ShopCreateIn, ShopPatchIn
 from app.producers.events import emit_admin_event, emit_user_event
 from package.common.errors import BadRequestError, ConflictError, NotFoundError
+from package.common.shop_hours import enforce_auto_close
 from package.common.utils import hash_password
 from package.logger import get_logger
 
@@ -22,8 +23,12 @@ def _address_display(p: RetailerProfile) -> str | None:
 
 def list_shops(session: Session) -> list[dict]:
     rows = session.exec(select(RetailerProfile)).all()
+    dirty = False
     out = []
     for p in rows:
+        if enforce_auto_close(p):
+            session.add(p)
+            dirty = True
         u = session.get(User, p.user_id)
         limit = float(p.credit_limit or 0)
         owed = float(p.outstanding_balance or 0)
@@ -52,6 +57,7 @@ def list_shops(session: Session) -> list[dict]:
                 "is_supplier": is_supplier,
                 "is_blocked": bool(p.is_blocked),
                 "approval_status": p.approval_status or "approved",
+                "sell_subscription_status": getattr(p, "sell_subscription_status", None) or "none",
                 "gstin": p.gstin,
                 "contact_phone": p.contact_phone,
                 "aadhaar_number": p.aadhaar_number,
@@ -66,8 +72,13 @@ def list_shops(session: Session) -> list[dict]:
                 "longitude": p.longitude,
                 "is_open": p.is_open,
                 "is_online": bool(u.is_online) if u else False,
+                "last_seen_at": getattr(u, "last_seen_at", None).isoformat()
+                if getattr(u, "last_seen_at", None)
+                else None,
             }
         )
+    if dirty:
+        session.commit()
     return out
 
 
@@ -141,6 +152,43 @@ def approve_shop(session: Session, retailer_user_id: int, payload: dict | None =
     emit_admin_event("shop_approved", payload)
     emit_user_event(profile.user_id, "shop_status", payload)
     return {"user_id": profile.user_id, "approval_status": "approved", "message": "Shop approved"}
+
+
+def set_sell_subscription(session: Session, retailer_user_id: int, status: str) -> dict:
+    from datetime import timedelta
+
+    from package.common.utils import utc_now
+
+    profile = session.exec(select(RetailerProfile).where(RetailerProfile.user_id == retailer_user_id)).first()
+    if not profile:
+        raise NotFoundError("Shop not found")
+    status = (status or "").strip().lower()
+    if status not in {"approved", "rejected", "pending", "none", "expired"}:
+        raise BadRequestError("status must be approved|rejected|pending|none|expired")
+    profile.sell_subscription_status = status
+    if status == "approved":
+        # Admin comp / override — grant 30 days if no expiry set
+        if not getattr(profile, "sell_subscription_expires_at", None):
+            profile.sell_plan = profile.sell_plan or "monthly"
+            profile.sell_subscription_expires_at = utc_now() + timedelta(days=30)
+        profile.sell_rz_pending = None
+    session.add(profile)
+    session.commit()
+    emit_user_event(
+        profile.user_id,
+        "sell_subscription",
+        {
+            "sell_subscription_status": status,
+            "shop_name": profile.shop_name,
+            "sell_plan": getattr(profile, "sell_plan", None),
+        },
+    )
+    return {
+        "user_id": profile.user_id,
+        "sell_subscription_status": status,
+        "sell_plan": getattr(profile, "sell_plan", None),
+        "message": f"Sell subscription set to {status}",
+    }
 
 
 def reject_shop(session: Session, retailer_user_id: int) -> dict:

@@ -42,8 +42,11 @@ def create_coupon(session: Session, body: CouponIn) -> Coupon:
     return c
 
 
-def list_banners(session: Session):
-    return list(session.exec(select(Banner).order_by(Banner.sort_order, Banner.id)).all())
+def list_banners(session: Session, *, shop_user_id: int | None = None):
+    stmt = select(Banner).order_by(Banner.sort_order, Banner.id)
+    if shop_user_id:
+        stmt = stmt.where(Banner.shop_user_id == shop_user_id)
+    return list(session.exec(stmt).all())
 
 
 def create_banner(session: Session, body: BannerIn) -> Banner:

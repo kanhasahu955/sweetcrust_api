@@ -16,6 +16,7 @@ class ProductIn(APIModel):
     allergens: Optional[str] = None
     flavor: Optional[str] = None
     weight: Optional[str] = None
+    unit_label: Optional[str] = "pcs"
     selling_price: float = 0
     customer_price: Optional[float] = None
     shop_price: Optional[float] = None
@@ -42,6 +43,8 @@ class ProductPatchIn(APIModel):
     supplier_user_id: Optional[int] = None
     short_description: Optional[str] = None
     description: Optional[str] = None
+    weight: Optional[str] = None
+    unit_label: Optional[str] = None
     selling_price: Optional[float] = None
     stock_qty: Optional[int] = None
     is_active: Optional[bool] = None
@@ -174,9 +177,35 @@ class ReturnAdminIn(APIModel):
 class RetailerProfilePatchIn(APIModel):
     shop_name: Optional[str] = None
     owner_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    email: Optional[str] = None
+    gstin: Optional[str] = None
+    upi_id: Optional[str] = None
     village: Optional[str] = None
     area: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zone: Optional[str] = None
+    pincode: Optional[str] = None
+    address_line: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    shop_open_time: Optional[str] = None
+    shop_close_time: Optional[str] = None
+    shop_days: Optional[str] = None
+    shop_logo_url: Optional[str] = None
     is_open: Optional[bool] = None
+    delivery_zones: Optional[str] = None
+    delivery_charge: Optional[float] = None
+    delivery_charge_far: Optional[float] = None
+    delivery_radius_km: Optional[float] = None
+    min_order_value: Optional[float] = None
+    cancellation_policy: Optional[str] = None
+    return_policy: Optional[str] = None
+    refund_policy: Optional[str] = None
+    chatbot_enabled: Optional[bool] = None
+    call_enabled: Optional[bool] = None
+    notifications_enabled: Optional[bool] = None
 
 
 class SupplierPurchaseIn(APIModel):

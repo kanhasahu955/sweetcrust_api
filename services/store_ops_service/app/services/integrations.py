@@ -124,6 +124,14 @@ def create_payment_link(
     }
 
 
+def get_payment_link(payment_link_id: str) -> dict:
+    with httpx.Client(timeout=30.0) as client:
+        resp = client.get(f"{API}/payment_links/{payment_link_id}", auth=_auth())
+    if resp.status_code >= 400:
+        raise BadGatewayError(f"Razorpay payment link fetch failed: {resp.text[:200]}")
+    return resp.json()
+
+
 def refund_payment(payment_id: str, amount_inr: float | None = None) -> dict:
     body: dict[str, Any] = {}
     if amount_inr is not None:

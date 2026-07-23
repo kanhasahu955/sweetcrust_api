@@ -101,6 +101,9 @@ export default fp(async (fastify) => {
     { prefix: '/api/v1/admin/returns/ai-assess', upstream: ai },
     { prefix: '/api/v1/retailer/ai', upstream: ai },
     { prefix: '/api/v1/retailer/products/ai-suggest', upstream: ai },
+    { prefix: '/api/v1/retailer/products/ai-copy', upstream: ai },
+    { prefix: '/api/v1/retailer/products/ai-image', upstream: ai },
+    { prefix: '/api/v1/retailer/banners/ai-copy', upstream: ai },
 
     // Domain admin slices (before /admin catch-all)
     { prefix: '/api/v1/admin/assortment', upstream: assortment },
