@@ -21,7 +21,7 @@ def check_delivery(session: Session, lat: float, lng: float) -> dict:
     blat, blng = bakery_coords(session)
     distance = haversine_km(blat, blng, lat, lng)
     return {
-        "deliverable": distance <= max_km,
+        "deliverable": True,  # no location restrict
         "distance_km": distance,
         "max_km": max_km,
         "bakery_lat": blat,
@@ -33,9 +33,4 @@ def assert_within_radius(session: Session, lat: float | None, lng: float | None)
     if lat is None or lng is None:
         raise BadRequestError("Delivery address must include map location (latitude/longitude)")
     result = check_delivery(session, lat, lng)
-    if not result["deliverable"]:
-        raise BadRequestError(
-            f"Sorry, we only deliver within {result['max_km']:.0f} km of the bakery "
-            f"(your location is {result['distance_km']} km away)."
-        )
     return result

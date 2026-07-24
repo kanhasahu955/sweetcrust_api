@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlmodel import Session, select
 
 from app.models.user import Address, User
-from app.services.geo import assert_within_radius
+from app.services.geo import check_delivery
 
 
 def list_addresses(session: Session, user_id: int) -> list[Address]:
@@ -11,7 +11,14 @@ def list_addresses(session: Session, user_id: int) -> list[Address]:
 
 
 def add_address(session: Session, user: User, body) -> dict:
-    coverage = assert_within_radius(session, body.latitude, body.longitude)
+    # Saving an address must not require delivery coverage — climate / profile use
+    # the pin even when checkout later rejects out-of-radius orders.
+    coverage: dict
+    if body.latitude is None or body.longitude is None:
+        coverage = {"deliverable": False, "detail": "Missing map coordinates"}
+    else:
+        coverage = check_delivery(session, float(body.latitude), float(body.longitude))
+
     if body.is_default:
         for a in session.exec(select(Address).where(Address.user_id == user.id)).all():
             a.is_default = False

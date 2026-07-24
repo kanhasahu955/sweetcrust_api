@@ -152,12 +152,14 @@ def razorpay_create(session: Session, user: User, order_id: int, use_payment_lin
     }
 
     if use_payment_link:
+        # Checkout phone first — guest accounts use synthetic +91GUEST… ids
+        pay_phone = order.customer_phone or user.phone
         link = razorpay_ops.create_payment_link(
             amount_inr=order.final_amount,
             description=f"SweetCrust {order.order_number}",
             reference_id=order.order_number,
             customer_name=user.name,
-            customer_phone=user.phone or order.customer_phone,
+            customer_phone=pay_phone,
             notes=notes,
         )
         gateway["payment_link"] = link

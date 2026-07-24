@@ -109,6 +109,18 @@ def create_order(*, amount_inr: float, receipt: str, notes: Optional[dict] = Non
     }
 
 
+def razorpay_contact(phone: str | None) -> str | None:
+    """Razorpay contact must be digits only, length 8–14."""
+    if not phone:
+        return None
+    digits = "".join(c for c in str(phone) if c.isdigit())
+    if len(digits) > 14:
+        digits = digits[-10:] if len(digits) >= 10 else digits[:14]
+    if 8 <= len(digits) <= 14:
+        return digits
+    return None
+
+
 def create_payment_link(
     *,
     amount_inr: float,
@@ -132,10 +144,9 @@ def create_payment_link(
     customer: dict[str, str] = {}
     if customer_name:
         customer["name"] = customer_name[:50]
-    if customer_phone:
-        phone = customer_phone.replace("+", "").replace(" ", "")[-15:]
-        if phone:
-            customer["contact"] = phone
+    contact = razorpay_contact(customer_phone)
+    if contact:
+        customer["contact"] = contact
     if customer:
         body["customer"] = customer
     if callback_url:

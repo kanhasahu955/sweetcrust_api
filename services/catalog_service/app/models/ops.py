@@ -179,6 +179,7 @@ class Banner(SQLModel, table=True):
     image_url: str = Field(max_length=500)
     link_type: Optional[str] = Field(default=None, max_length=50)
     link_value: Optional[str] = Field(default=None, max_length=200)
+    shop_user_id: Optional[int] = Field(default=None, index=True)
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=utc_now)

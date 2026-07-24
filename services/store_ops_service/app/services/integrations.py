@@ -107,9 +107,11 @@ def create_payment_link(
         "notes": notes or {},
     }
     if customer_phone:
-        phone = customer_phone.replace("+", "").replace(" ", "")[-15:]
-        if phone:
-            body["customer"] = {"contact": phone}
+        digits = "".join(c for c in str(customer_phone) if c.isdigit())
+        if len(digits) > 14:
+            digits = digits[-10:] if len(digits) >= 10 else digits[:14]
+        if 8 <= len(digits) <= 14:
+            body["customer"] = {"contact": digits}
     with httpx.Client(timeout=30.0) as client:
         resp = client.post(f"{API}/payment_links", json=body, auth=_auth())
     if resp.status_code >= 400:
