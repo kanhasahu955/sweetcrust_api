@@ -38,6 +38,7 @@ class Order(SQLModel, table=True):
     customer_phone: Optional[str] = Field(default=None, max_length=20)
     address_snapshot: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     estimated_delivery_at: Optional[datetime] = Field(default=None)
+    offer_expires_at: Optional[datetime] = Field(default=None)
     delivered_at: Optional[datetime] = Field(default=None)
     cancelled_at: Optional[datetime] = Field(default=None)
     cancel_reason: Optional[str] = Field(default=None, max_length=500)

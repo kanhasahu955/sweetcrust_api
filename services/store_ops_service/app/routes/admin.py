@@ -49,8 +49,11 @@ async def patch_order_status(order_id: int, body: OrderStatusUpdateIn, session: 
 
 @router.post('/orders/{order_id}/assign-delivery')
 async def assign_delivery(order_id: int, body: DeliveryAssignIn, session: AsyncSessionDep, admin: AdminUser):
-    from app.models.enums import OrderStatus
-    return ok(await _domain(session, order_ops.update_order_status, order_id, OrderStatus.DELIVERY_ASSIGNED.value, admin.id, None, body.delivery_person_id))
+    return ok(await _domain(session, order_ops.assign_delivery, order_id, body.delivery_person_id, admin.id))
+
+@router.post('/orders/{order_id}/offer-delivery')
+async def offer_delivery(order_id: int, body: DeliveryAssignIn, session: AsyncSessionDep, admin: AdminUser):
+    return ok(await _domain(session, order_ops.offer_delivery, order_id, body.delivery_person_id, admin.id))
 
 @router.post('/orders/{order_id}/invoice')
 async def post_invoice(order_id: int, session: AsyncSessionDep, _: AdminUser):

@@ -94,6 +94,7 @@ class DeliveryAssignIn(APIModel):
 class DeliveryPersonIn(APIModel):
     name: str
     phone: str
+    password: str
     vehicle_number: str
     default_trip_cost: float = 40.0
     is_available: bool = True
@@ -102,6 +103,7 @@ class DeliveryPersonIn(APIModel):
 class DeliveryPersonPatchIn(APIModel):
     name: Optional[str] = None
     phone: Optional[str] = None
+    password: Optional[str] = None
     vehicle_number: Optional[str] = None
     is_available: Optional[bool] = None
     default_trip_cost: Optional[float] = None

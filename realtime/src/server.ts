@@ -221,6 +221,13 @@ async function startRedisFanout(): Promise<void> {
       if (channel === CHANNELS.ORDER_STATUS && data.order_id != null) {
         io.to(`order:${data.order_id}`).emit('order_status', data)
         io.to('admin').emit('order_status', data)
+        // Fan out to the assigned rider (rooms joined on connect for role=delivery)
+        const riderUserId = data.rider_user_id ?? data.delivery_user_id
+        if (riderUserId != null) {
+          io.to(`rider:${riderUserId}`).emit('order_status', data)
+          io.to(`user:${riderUserId}`).emit('order_status', data)
+        }
+        io.to('delivery').emit('order_status', data)
       }
       if (channel === CHANNELS.CHAT_MESSAGE && data.conversation_id != null) {
         io.to(`chat:${data.conversation_id}`).emit('chat_message', data)

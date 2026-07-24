@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 from app.deps import DeliveryUser, SessionDep
 from app.services import rider as rider_ops
-from app.schemas.delivery import AvailabilityIn, RiderLocationIn
+from app.schemas.delivery import AvailabilityIn, RiderLocationIn, RiderStatusIn
 from package.common.schemas import ok
 
 router = APIRouter(prefix="/delivery", tags=["delivery"])
@@ -39,6 +39,21 @@ def location(body: RiderLocationIn, session: SessionDep, user: DeliveryUser):
             distance_km=body.distance_km,
         )
     )
+
+
+@router.post("/orders/{order_id}/accept")
+def accept(order_id: int, session: SessionDep, user: DeliveryUser):
+    return ok(rider_ops.accept_order(session, user, order_id))
+
+
+@router.post("/orders/{order_id}/reject")
+def reject(order_id: int, session: SessionDep, user: DeliveryUser):
+    return ok(rider_ops.reject_order(session, user, order_id))
+
+
+@router.post("/orders/{order_id}/status")
+def status(order_id: int, body: RiderStatusIn, session: SessionDep, user: DeliveryUser):
+    return ok(rider_ops.update_order_status(session, user, order_id, body.status))
 
 
 @router.post("/orders/{order_id}/delivered")

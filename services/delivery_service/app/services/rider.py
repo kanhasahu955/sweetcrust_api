@@ -3,16 +3,18 @@ from __future__ import annotations
 
 from sqlmodel import Session, select
 
-from app.producers.events import emit_delivery_location, emit_order_status
+from app.producers.events import emit_admin_event, emit_delivery_location, emit_order_status, emit_user_event
 from app.models.commerce import Order, OrderItem, Payment
 from app.models.enums import OrderStatus, PaymentStatus
 from app.models.ops import DeliveryPerson, DeliveryTracking
 from app.models.user import User
-from package.common.errors import ForbiddenError, NotFoundError
+from package.common.errors import BadRequestError, ForbiddenError, NotFoundError
 from package.common.utils import utc_now
 from package.logger import get_logger
 
 logger = get_logger(__name__)
+
+RIDER_STATUS_STEPS = ("picked_up", "out_for_delivery", "near_location")
 
 
 def _person_for_user(session: Session, user: User) -> DeliveryPerson:
@@ -25,7 +27,18 @@ def _person_for_user(session: Session, user: User) -> DeliveryPerson:
             session.commit()
             session.refresh(person)
     if not person:
-        raise NotFoundError("Delivery profile not linked — ask admin to assign your phone")
+        # Delivery-role users can log in before admin creates a rider row — provision one.
+        person = DeliveryPerson(
+            user_id=user.id,
+            name=(user.name or "Rider").strip() or "Rider",
+            phone=user.phone,
+            vehicle_number="TBD",
+            is_available=True,
+        )
+        session.add(person)
+        session.commit()
+        session.refresh(person)
+        logger.info("auto-created delivery_person id=%s for user_id=%s", person.id, user.id)
     return person
 
 
@@ -90,6 +103,40 @@ def order_detail(session: Session, order_id: int) -> dict:
     }
 
 
+def _clear_expired_offer(session: Session, order: Order) -> bool:
+    """Lazy timeout for delivery_offered — returns True if cleared."""
+    if order.status != OrderStatus.DELIVERY_OFFERED:
+        return False
+    exp = getattr(order, "offer_expires_at", None)
+    if exp and exp > utc_now():
+        return False
+    rider_uid = None
+    if order.delivery_person_id:
+        person = session.get(DeliveryPerson, order.delivery_person_id)
+        rider_uid = person.user_id if person else None
+    order_id = order.id
+    order_number = order.order_number
+    person_id = order.delivery_person_id
+    order.status = OrderStatus.PACKED
+    order.delivery_person_id = None
+    order.offer_expires_at = None
+    order.updated_at = utc_now()
+    order.internal_notes = ((order.internal_notes or "") + "\nOffer expired").strip()
+    session.add(order)
+    session.commit()
+    emit_admin_event(
+        "delivery_offer_expired",
+        {"order_id": order_id, "order_number": order_number, "delivery_person_id": person_id},
+    )
+    if rider_uid:
+        emit_user_event(rider_uid, "delivery_cancelled", {"order_id": order_id, "reason": "expired"})
+    emit_order_status(
+        order_id,
+        {"status": OrderStatus.PACKED.value, "user_id": order.user_id, "rider_user_id": rider_uid},
+    )
+    return True
+
+
 def my_orders(session: Session, user: User) -> list[dict]:
     person = _person_for_user(session, user)
     orders = list(
@@ -100,7 +147,12 @@ def my_orders(session: Session, user: User) -> list[dict]:
             .limit(50)
         ).all()
     )
-    return [order_detail(session, o.id) for o in orders]
+    out = []
+    for o in orders:
+        if _clear_expired_offer(session, o):
+            continue
+        out.append(order_detail(session, o.id))
+    return out
 
 
 def update_availability(session: Session, user: User, is_available: bool) -> dict:
@@ -164,11 +216,130 @@ def update_location(
     }
 
 
+def accept_order(session: Session, user: User, order_id: int) -> Order:
+    person = _person_for_user(session, user)
+    order = session.get(Order, order_id)
+    if not order or order.delivery_person_id != person.id:
+        raise ForbiddenError("Order not offered to you")
+    if _clear_expired_offer(session, order):
+        raise BadRequestError("Offer expired")
+    order = session.get(Order, order_id)
+    if not order or order.status != OrderStatus.DELIVERY_OFFERED:
+        raise BadRequestError("Order is not an open offer")
+    order.status = OrderStatus.DELIVERY_ASSIGNED
+    order.offer_expires_at = None
+    order.updated_at = utc_now()
+    order.internal_notes = ((order.internal_notes or "") + "\nAccepted by rider").strip()
+    session.add(order)
+    session.commit()
+    session.refresh(order)
+    emit_order_status(
+        order_id,
+        {
+            "status": order.status.value,
+            "user_id": order.user_id,
+            "delivery_person_id": order.delivery_person_id,
+            "rider_user_id": user.id,
+        },
+    )
+    emit_user_event(
+        user.id,
+        "delivery_job",
+        {"order_id": order.id, "order_number": order.order_number, "status": order.status.value},
+    )
+    emit_admin_event("delivery_accepted", {"order_id": order.id, "delivery_person_id": person.id})
+    return order
+
+
+def reject_order(session: Session, user: User, order_id: int) -> dict:
+    person = _person_for_user(session, user)
+    order = session.get(Order, order_id)
+    if not order or order.delivery_person_id != person.id:
+        raise ForbiddenError("Order not offered to you")
+    if order.status != OrderStatus.DELIVERY_OFFERED:
+        raise BadRequestError("Only open offers can be rejected")
+    order.status = OrderStatus.PACKED
+    order.delivery_person_id = None
+    order.offer_expires_at = None
+    order.updated_at = utc_now()
+    order.internal_notes = ((order.internal_notes or "") + "\nRejected by rider").strip()
+    session.add(order)
+    session.commit()
+    emit_admin_event(
+        "delivery_rejected",
+        {"order_id": order_id, "delivery_person_id": person.id, "order_number": order.order_number},
+    )
+    emit_user_event(user.id, "delivery_cancelled", {"order_id": order_id, "reason": "rejected"})
+    emit_order_status(
+        order_id,
+        {"status": OrderStatus.PACKED.value, "user_id": order.user_id, "rider_user_id": user.id},
+    )
+    return {"ok": True, "order_id": order_id}
+
+
+def update_order_status(session: Session, user: User, order_id: int, status: str) -> Order:
+    person = _person_for_user(session, user)
+    order = session.get(Order, order_id)
+    if not order or order.delivery_person_id != person.id:
+        raise ForbiddenError("Order not assigned to you")
+    if order.status == OrderStatus.DELIVERY_OFFERED:
+        raise BadRequestError("Accept the offer before updating trip status")
+
+    key = str(status or "").strip().lower()
+    if key == "reached_bakery":
+        order.internal_notes = ((order.internal_notes or "") + "\nReached bakery").strip()
+        order.updated_at = utc_now()
+        session.add(order)
+        session.commit()
+        session.refresh(order)
+        emit_user_event(
+            user.id,
+            "delivery_updated",
+            {"order_id": order.id, "status": "reached_bakery"},
+        )
+        emit_order_status(
+            order_id,
+            {
+                "status": order.status.value,
+                "step": "reached_bakery",
+                "user_id": order.user_id,
+                "delivery_person_id": order.delivery_person_id,
+                "rider_user_id": user.id,
+            },
+        )
+        return order
+
+    if key not in RIDER_STATUS_STEPS:
+        raise BadRequestError(f"Invalid status. Allowed: reached_bakery, {', '.join(RIDER_STATUS_STEPS)}")
+    try:
+        st = OrderStatus(key)
+    except ValueError as exc:
+        raise BadRequestError(f"Invalid status: {key}") from exc
+
+    order.status = st
+    order.updated_at = utc_now()
+    session.add(order)
+    session.commit()
+    session.refresh(order)
+    emit_order_status(
+        order_id,
+        {
+            "status": st.value,
+            "user_id": order.user_id,
+            "delivery_person_id": order.delivery_person_id,
+            "rider_user_id": user.id,
+        },
+    )
+    return order
+
+
 def mark_delivered(session: Session, user: User, order_id: int) -> Order:
     person = _person_for_user(session, user)
     order = session.get(Order, order_id)
     if not order or order.delivery_person_id != person.id:
         raise ForbiddenError("Order not assigned to you")
+    if order.status == OrderStatus.DELIVERY_OFFERED:
+        raise BadRequestError("Accept the offer before delivering")
 
     st = OrderStatus.DELIVERED
     order.status = st
@@ -194,6 +365,7 @@ def mark_delivered(session: Session, user: User, order_id: int) -> Order:
             "status": st.value,
             "user_id": order.user_id,
             "delivery_person_id": order.delivery_person_id,
+            "rider_user_id": user.id,
         },
     )
     return order

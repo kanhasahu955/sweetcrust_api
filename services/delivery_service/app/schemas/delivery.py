@@ -17,3 +17,7 @@ class RiderLocationIn(APIModel):
     order_id: Optional[int] = None
     eta_minutes: Optional[int] = None
     distance_km: Optional[float] = Field(default=None, ge=0)
+
+
+class RiderStatusIn(APIModel):
+    status: str

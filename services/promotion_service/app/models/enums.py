@@ -21,6 +21,7 @@ class OrderStatus(str, Enum):
     REJECTED = "rejected"
     PREPARING = "preparing"
     PACKED = "packed"
+    DELIVERY_OFFERED = "delivery_offered"
     DELIVERY_ASSIGNED = "delivery_assigned"
     PICKED_UP = "picked_up"
     OUT_FOR_DELIVERY = "out_for_delivery"

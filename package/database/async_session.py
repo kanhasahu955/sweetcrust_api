@@ -105,6 +105,7 @@ def _migrate_columns_sync(conn) -> None:
         "ALTER TABLE products ADD COLUMN supplier_available_qty INT NOT NULL DEFAULT 0",
         "ALTER TABLE orders ADD COLUMN shop_user_id INT NULL",
         "ALTER TABLE orders ADD COLUMN paid_amount DOUBLE NOT NULL DEFAULT 0",
+        "ALTER TABLE orders ADD COLUMN offer_expires_at DATETIME NULL",
         "CREATE INDEX ix_products_brand_name ON products (brand_name)",
         "CREATE INDEX ix_products_supplier_user_id ON products (supplier_user_id)",
         "CREATE INDEX ix_orders_shop_user_id ON orders (shop_user_id)",

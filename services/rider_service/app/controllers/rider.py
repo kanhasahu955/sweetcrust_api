@@ -27,5 +27,17 @@ def mark_delivered(session: Session, user, order_id: int):
     return rider_ops.mark_delivered(session, user, order_id)
 
 
+def accept_order(session: Session, user, order_id: int):
+    return rider_ops.accept_order(session, user, order_id)
+
+
+def reject_order(session: Session, user, order_id: int):
+    return rider_ops.reject_order(session, user, order_id)
+
+
+def update_order_status(session: Session, user, order_id: int, status: str):
+    return rider_ops.update_order_status(session, user, order_id, status)
+
+
 def check_delivery(session: Session, lat: float, lng: float):
     return radius_ops.check_delivery(session, lat, lng)
